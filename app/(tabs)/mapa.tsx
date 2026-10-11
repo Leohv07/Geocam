@@ -5,13 +5,20 @@ import MapView, { Marker, type Region } from 'react-native-maps';
 import { useIsFocused } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGeoLocation } from '@/hooks/useGeoLocation';
-import { useGeoPhotos } from '@/context/GeoPhotosContext';
+import { usePhotos } from '@/hooks/usePhotos';
 import { PhotoThumb } from '@/components/PhotoThumb';
-import type { Coords, GeoPhoto } from '@/types/geo';
+import type { Photo } from '@/hooks/usePhotos';
+import type { Coords } from '@/types/geo';
 
 const DELTA = { latitudeDelta: 0.02, longitudeDelta: 0.02 };
 // Solo se usa si no hay ubicación ni fotos con coordenadas
 const FALLBACK_REGION: Region = { latitude: 4.711, longitude: -74.0721, latitudeDelta: 8, longitudeDelta: 8 };
+
+/** Convierte las columnas planas de la fila en Coords (o null si no tiene ubicación). */
+function photoCoords(p: Photo | undefined): Coords | null {
+  if (!p || p.latitude === null || p.longitude === null) return null;
+  return { latitude: p.latitude, longitude: p.longitude, accuracy: p.accuracy, timestamp: p.createdAt.getTime() };
+}
 
 function toRegion(c: Coords): Region {
   return { latitude: c.latitude, longitude: c.longitude, ...DELTA };
@@ -22,11 +29,11 @@ export default function MapaScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   const geo = useGeoLocation({ watch: false }); // en el mapa basta una lectura al enfocar
-  const { photos, removePhoto } = useGeoPhotos();
-  const [selected, setSelected] = useState<GeoPhoto | null>(null);
+  const { photos, photosWithLocation, removePhoto } = usePhotos(); // T5
+  const [selected, setSelected] = useState<Photo | null>(null);
 
-  const withCoords = useMemo(() => photos.filter((p) => p.coords !== null), [photos]);
-  const withoutCoords = useMemo(() => photos.filter((p) => p.coords === null), [photos]);
+  const withCoords = photosWithLocation; // consulta withLocationQuery (isNotNull)
+  const withoutCoords = useMemo(() => photos.filter((p) => p.latitude === null), [photos]);
 
   // Si la foto seleccionada se borró (p. ej. al agitar), se cierra la tarjeta
   useEffect(() => {
@@ -41,7 +48,7 @@ export default function MapaScreen() {
 
   // Centro: tu ubicación; sin permiso, la última foto con coordenadas
   const center: Coords | null =
-    (geo.permission === 'granted' ? geo.coords : null) ?? withCoords[0]?.coords ?? null;
+    (geo.permission === 'granted' ? geo.coords : null) ?? photoCoords(withCoords[0]);
 
   useEffect(() => {
     if (center && isFocused) mapRef.current?.animateToRegion(toRegion(center), 500);
@@ -49,10 +56,10 @@ export default function MapaScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center?.latitude, center?.longitude, isFocused]);
 
-  const confirmRemove = (photo: GeoPhoto) =>
+  const confirmRemove = (photo: Photo) =>
     Alert.alert('¿Eliminar foto?', undefined, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: () => removePhoto(photo.id) },
+      { text: 'Eliminar', style: 'destructive', onPress: () => void removePhoto(photo.id) },
     ]);
 
   return (
@@ -65,10 +72,10 @@ export default function MapaScreen() {
         onPress={() => setSelected(null)}
       >
         {withCoords.map((photo) =>
-          photo.coords ? (
+          photo.latitude !== null && photo.longitude !== null ? (
             <Marker
               key={photo.id}
-              coordinate={{ latitude: photo.coords.latitude, longitude: photo.coords.longitude }}
+              coordinate={{ latitude: photo.latitude, longitude: photo.longitude }}
               // Cámara = verde, galería = azul
               pinColor={photo.source === 'gallery' ? '#38bdf8' : '#34d399'}
               onPress={(e) => {
@@ -93,18 +100,17 @@ export default function MapaScreen() {
       </View>
 
       {/* Miniatura de la foto seleccionada */}
-      {selected && selected.coords && (
+      {selected && selected.latitude !== null && selected.longitude !== null && (
         <View className="absolute left-4 right-4 flex-row items-center gap-3 rounded-2xl bg-neutral-900 p-3" style={{ bottom: withoutCoords.length > 0 ? 150 : 16 }}>
           <Image source={{ uri: selected.uri }} className="h-24 w-24 rounded-xl" />
           <View className="flex-1 gap-1">
             <Text className={`text-xs font-bold ${selected.source === 'gallery' ? 'text-sky-400' : 'text-emerald-400'}`}>
               {selected.source === 'gallery' ? 'GALERÍA' : 'CÁMARA'}
-              {selected.coordsOrigin === 'exif' ? ' · coords EXIF' : ''}
             </Text>
             <Text className="font-mono text-xs text-neutral-300">
-              {selected.coords.latitude.toFixed(5)}, {selected.coords.longitude.toFixed(5)}
+              {selected.latitude.toFixed(5)}, {selected.longitude.toFixed(5)}
             </Text>
-            <Text className="text-xs text-neutral-500">{new Date(selected.createdAt).toLocaleString()}</Text>
+            <Text className="text-xs text-neutral-500">{selected.createdAt.toLocaleString()}</Text>
             <Pressable onPress={() => confirmRemove(selected)} accessibilityRole="button">
               <Text className="text-sm font-semibold text-red-400">Eliminar</Text>
             </Pressable>
@@ -119,7 +125,7 @@ export default function MapaScreen() {
           <FlatList
             horizontal
             data={withoutCoords}
-            keyExtractor={(p) => p.id}
+            keyExtractor={(p) => String(p.id)}
             contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
             showsHorizontalScrollIndicator={false}
             renderItem={({ item }) => (

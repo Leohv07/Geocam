@@ -1,9 +1,9 @@
 // components/PhotoThumb.tsx — miniatura que distingue visualmente cámara vs. galería
 import { View, Text, Image } from 'react-native';
-import type { GeoPhoto } from '@/types/geo';
+import type { PhotoSource } from '@/types/geo';
 
 interface Props {
-  photo: GeoPhoto;
+  photo: { uri: string; source: PhotoSource };
   size?: 'sm' | 'md';
 }
 

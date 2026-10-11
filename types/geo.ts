@@ -14,13 +14,3 @@ export interface Coords {
 }
 
 export type PhotoSource = 'camera' | 'gallery';
-
-export interface GeoPhoto {
-  id: string;
-  uri: string;
-  coords: Coords | null; // null si el usuario negó la ubicación
-  source: PhotoSource;
-  createdAt: number;
-  /** De dónde salieron las coordenadas: GPS del dispositivo o EXIF original (reto opcional). */
-  coordsOrigin?: 'device' | 'exif';
-}

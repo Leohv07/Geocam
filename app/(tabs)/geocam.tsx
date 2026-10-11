@@ -10,7 +10,7 @@ import { useShake } from '@/hooks/useShake';
 import { useLevel } from '@/hooks/useLevel';
 import { PermissionPrimer } from '@/components/PermissionPrimer';
 import { PhotoThumb } from '@/components/PhotoThumb';
-import { useGeoPhotos, createPhotoId } from '@/context/GeoPhotosContext';
+import { usePhotos } from '@/hooks/usePhotos';
 import { coordsFromExif, gpsKeys } from '@/lib/exif';
 import type { Coords } from '@/types/geo';
 
@@ -21,7 +21,7 @@ export default function GeoCamScreen() {
   const cam = useCamera();
   const geo = useGeoLocation({ watch: isFocused });
   const level = useLevel(isFocused);
-  const { photos, addPhoto, clearAll } = useGeoPhotos();
+  const { photos, addPhoto, clearAll } = usePhotos(); // T5: SQLite en lugar del Context
   const [isImporting, setIsImporting] = useState(false);
 
   // R4: agitar el teléfono pregunta si se borran todas las fotos
@@ -29,7 +29,8 @@ export default function GeoCamScreen() {
     if (photos.length === 0) return;
     Alert.alert('¿Borrar todas las fotos?', `Se eliminarán ${photos.length} foto(s).`, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Borrar', style: 'destructive', onPress: clearAll },
+      // T5: useShake termina llamando a photosRepo.clearAll()
+      { text: 'Borrar', style: 'destructive', onPress: () => void clearAll() },
     ]);
   }, [photos.length, clearAll]);
   useShake(handleShake, { threshold: 1.8, cooldownMs: 1500, enabled: isFocused });
@@ -44,14 +45,7 @@ export default function GeoCamScreen() {
     const photo = await cam.takePhoto();
     if (!photo) return;
     const coords = await currentCoords();
-    addPhoto({
-      id: createPhotoId(),
-      uri: photo.uri,
-      coords,
-      coordsOrigin: coords ? 'device' : undefined,
-      source: 'camera',
-      createdAt: Date.now(),
-    });
+    await addPhoto({ uri: photo.uri, coords, source: 'camera' });
   };
 
   // R2: importar desde galería (el selector del sistema no requiere permiso de galería)
@@ -70,14 +64,7 @@ export default function GeoCamScreen() {
       const exifCoords = coordsFromExif(asset.exif);
       const coords = exifCoords ?? (await currentCoords());
 
-      addPhoto({
-        id: createPhotoId(),
-        uri: asset.uri,
-        coords,
-        coordsOrigin: exifCoords ? 'exif' : coords ? 'device' : undefined,
-        source: 'gallery',
-        createdAt: Date.now(),
-      });
+      await addPhoto({ uri: asset.uri, coords, source: 'gallery' });
     } catch (e) {
       Alert.alert('No se pudo importar', e instanceof Error ? e.message : 'Error desconocido');
     } finally {
