@@ -27,6 +27,16 @@ export const photos = sqliteTable('photos', {
   // C2: nota opcional y favorita con valor por defecto false
   note: text('note'),
   favorite: integer('favorite', { mode: 'boolean' }).notNull().default(false),
+  // Semana 8 (T4): identidad compartida con la nube. El id autoincremental solo vale en este teléfono.
+  // El UUID se genera en photosRepo.create(): importar expo-crypto aquí rompe drizzle-kit (corre en Node).
+  clientId: text('client_id').unique(),
+  // Última modificación hecha por el usuario
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  // Ruta del archivo en el bucket y momento de la última sincronización
+  remotePath: text('remote_path'),
+  syncedAt: integer('synced_at', { mode: 'timestamp_ms' }),
+  // Semana 8 (C5): id del usuario de Supabase dueño de la foto en este teléfono
+  ownerId: text('owner_id'),
 });
 
 export type Album = typeof albums.$inferSelect;

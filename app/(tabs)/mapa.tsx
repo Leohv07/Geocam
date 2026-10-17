@@ -59,7 +59,18 @@ export default function MapaScreen() {
   const confirmRemove = (photo: Photo) =>
     Alert.alert('¿Eliminar foto?', undefined, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: () => void removePhoto(photo.id) },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        // Semana 8 (C3): si la nube no responde, no se borra nada
+        onPress: async () => {
+          try {
+            await removePhoto(photo.id);
+          } catch {
+            Alert.alert('Sin conexión', 'No se pudo borrar la foto de la nube. No se borró nada; inténtalo de nuevo.');
+          }
+        },
+      },
     ]);
 
   return (

@@ -1,6 +1,6 @@
-// app/foto/[id].tsx — C3: ver, editar nota, favorita, mover de álbum y eliminar
+// app/foto/[id].tsx — ver, editar nota, favorita, mover de álbum, subir a la nube y eliminar
 import { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, Image, ScrollView, Alert } from 'react-native';
+import { View, Text, TextInput, Pressable, Image, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { usePhoto } from '@/hooks/usePhoto';
 import { useAlbums } from '@/hooks/useAlbums';
@@ -8,7 +8,18 @@ import { useAlbums } from '@/hooks/useAlbums';
 export default function FotoDetalleScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const photoId = Number(id);
-  const { photo, albumName, saveNote, setFavorite, moveToAlbum, remove } = usePhoto(photoId);
+  const {
+    photo,
+    albumName,
+    isSynced,
+    isPending,
+    isUploading,
+    saveNote,
+    setFavorite,
+    moveToAlbum,
+    upload,
+    remove,
+  } = usePhoto(photoId);
   const { albums, createAlbum } = useAlbums();
 
   const [note, setNote] = useState('');
@@ -40,22 +51,46 @@ export default function FotoDetalleScreen() {
     if (!error) setNewAlbum('');
   };
 
+  // T5: subir esta foto a Supabase
+  const handleUpload = async () => {
+    const error = await upload();
+    if (error) Alert.alert('No se pudo subir', error);
+    else setMessage('Foto guardada en la nube ☁️');
+  };
+
+  // C3: si la foto está en la nube, se borra allá primero; sin conexión no se borra nada
   const confirmDelete = () =>
-    Alert.alert('Eliminar foto', 'Se borrará el registro y el archivo. ¿Continuar?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: async () => {
-          await remove();
-          router.back();
+    Alert.alert(
+      'Eliminar foto',
+      isSynced
+        ? 'Se borrará del teléfono y de la nube (registro y archivo). ¿Continuar?'
+        : 'Se borrará el registro y el archivo. ¿Continuar?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await remove();
+              router.back();
+            } catch {
+              Alert.alert('Sin conexión', 'No se pudo borrar la foto de la nube. No se borró nada; inténtalo de nuevo.');
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
 
   const chip = (active: boolean) =>
     `rounded-full border px-3 py-1.5 ${active ? 'border-sky-400 bg-sky-400' : 'border-neutral-700'}`;
   const chipText = (active: boolean) => (active ? 'font-semibold text-neutral-950' : 'text-neutral-300');
+
+  const cloudLabel = !isSynced
+    ? '☁️ Subir a la nube'
+    : isPending
+      ? '☁️ Actualizar en la nube'
+      : '✅ Guardada en la nube';
 
   return (
     <ScrollView className="flex-1 bg-neutral-950" contentContainerStyle={{ padding: 16, gap: 16 }}>
@@ -80,6 +115,21 @@ export default function FotoDetalleScreen() {
             : 'Sin ubicación'}
         </Text>
       </View>
+
+      {/* T5: subir a la nube */}
+      <Pressable
+        onPress={handleUpload}
+        disabled={isUploading || (isSynced && !isPending)}
+        className={`flex-row items-center justify-center gap-2 rounded-xl p-3 ${isSynced && !isPending ? 'border border-emerald-500' : 'bg-sky-500'}`}
+      >
+        {isUploading ? (
+          <ActivityIndicator color="#0a0a0a" />
+        ) : (
+          <Text className={isSynced && !isPending ? 'font-semibold text-emerald-400' : 'font-semibold text-neutral-950'}>
+            {cloudLabel}
+          </Text>
+        )}
+      </Pressable>
 
       {/* Favorita */}
       <Pressable

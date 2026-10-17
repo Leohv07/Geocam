@@ -1,11 +1,40 @@
-// app/_layout.tsx — layout raíz protegido por las migraciones (T2)
+// app/_layout.tsx — primero las migraciones locales (Semana 7), después la autenticación (Semana 8)
 import '../global.css';
+import { useEffect } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useMigrations } from 'drizzle-orm/expo-sqlite/migrator';
 import migrations from '@/drizzle/migrations';
 import { db } from '@/db/client';
+import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { photosRepo } from '@/db/repositories/photos';
+
+function RootNavigator() {
+  const { session, isLoading } = useAuth();
+  const userId = session?.user.id;
+
+  // T4 + C5: al iniciar sesión, las fotos antiguas reciben clientId/updatedAt y las fotos sin dueño pasan a este usuario
+  useEffect(() => {
+    if (userId) void photosRepo.ensureSyncFields(userId);
+  }, [userId]);
+
+  // Mientras se lee la sesión guardada en SecureStore
+  if (isLoading) return <View className="flex-1 bg-neutral-950" />;
+
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      {/* T2: sin sesión, estas pantallas no existen para el navegador */}
+      <Stack.Protected guard={!!session}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="foto/[id]" options={{ headerShown: true, title: 'Foto' }} />
+      </Stack.Protected>
+      <Stack.Protected guard={!session}>
+        <Stack.Screen name="login" />
+      </Stack.Protected>
+    </Stack>
+  );
+}
 
 export default function RootLayout() {
   // Aplica solo las migraciones pendientes y registra cuáles ya corrió
@@ -29,9 +58,9 @@ export default function RootLayout() {
   }
 
   return (
-    <>
+    <AuthProvider>
       <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false }} />
-    </>
+      <RootNavigator />
+    </AuthProvider>
   );
 }

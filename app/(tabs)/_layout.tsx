@@ -27,6 +27,13 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="nube"
+        options={{
+          title: 'Nube',
+          tabBarIcon: ({ color, size }) => <Ionicons name="cloud" color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
         name="mapa"
         options={{
           title: 'Mapa',

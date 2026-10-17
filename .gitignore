@@ -33,6 +33,11 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Credenciales: NUNCA van a GitHub. Se versiona .env.example, no .env
+.env
+.env.*
+!.env.example
+
 # typescript
 *.tsbuildinfo
 

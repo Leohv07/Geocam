@@ -29,8 +29,17 @@ export default function GeoCamScreen() {
     if (photos.length === 0) return;
     Alert.alert('¿Borrar todas las fotos?', `Se eliminarán ${photos.length} foto(s).`, [
       { text: 'Cancelar', style: 'cancel' },
-      // T5: useShake termina llamando a photosRepo.clearAll()
-      { text: 'Borrar', style: 'destructive', onPress: () => void clearAll() },
+      {
+        text: 'Borrar',
+        style: 'destructive',
+        // Semana 8 (C3): también se borran de la nube; las que no se puedan borrar allá se conservan
+        onPress: async () => {
+          const kept = await clearAll();
+          if (kept > 0) {
+            Alert.alert('Sin conexión', `${kept} foto(s) sincronizada(s) no se pudieron borrar de la nube y se conservaron.`);
+          }
+        },
+      },
     ]);
   }, [photos.length, clearAll]);
   useShake(handleShake, { threshold: 1.8, cooldownMs: 1500, enabled: isFocused });

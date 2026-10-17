@@ -1,6 +1,8 @@
-// app/index.tsx — la app abre directamente en la pestaña GeoCam
+// app/index.tsx — fuera de los grupos protegidos: redirige según la sesión
 import { Redirect } from 'expo-router';
+import { useAuth } from '@/context/AuthContext';
 
 export default function Index() {
-  return <Redirect href="/geocam" />;
+  const { session } = useAuth();
+  return <Redirect href={session ? '/geocam' : '/login'} />;
 }

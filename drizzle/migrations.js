@@ -3,12 +3,16 @@
 import journal from './meta/_journal.json';
 import m0000 from './0000_init_photos.sql';
 import m0001 from './0001_albums_note_favorite.sql';
+import m0002 from './0002_sync_fields.sql';
+import m0003 from './0003_owner_id.sql';
 
   export default {
     journal,
     migrations: {
       m0000,
-m0001
+m0001,
+m0002,
+m0003
     }
   }
   

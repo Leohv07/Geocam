@@ -1,81 +1,89 @@
 # Registro de Auditoría de IA (AI-LOG)
 
 **Integrantes:** Leonardo Hernández, Julián Ortiz
-**Semana:** 7
-**Proyecto:** GeoCam persistente – Taller Integrador 2 (taller en clase T1–T6 + trabajo para la casa C1–C6)
-**Versiones verificadas en `package.json`:** Expo SDK 57, `expo-sqlite` ~57.0.3, `expo-file-system` ~57.0.7, `drizzle-orm` 0.45.3, `drizzle-kit` 0.31.11
+**Semana:** 8
+**Proyecto:** GeoCam con respaldo en la nube — Backend as a Service con Supabase (taller en clase T1–T6 + trabajo para la casa C1–C7)
+**Versiones verificadas en `package.json`:** Expo SDK 57, `@supabase/supabase-js` 2.x, `expo-secure-store` ~57.0, `expo-crypto` ~57.0, `drizzle-orm` 0.45, `drizzle-kit` 0.31
 
-> El AI-LOG de la Semana 6 quedó en [`docs/AI-LOG-semana6.md`](./docs/AI-LOG-semana6.md).
+> Los AI-LOG anteriores están en [`docs/AI-LOG-semana6.md`](./docs/AI-LOG-semana6.md) y [`docs/AI-LOG-semana7.md`](./docs/AI-LOG-semana7.md).
 
 ## 1. Prompts Utilizados
 
-- "Ayúdame con la Guía Semana 7 paso a paso: reemplaza el `GeoPhotosContext` de GeoCam por SQLite con Drizzle (T1–T6), con repositorio `photos`, hook `usePhotos` y migraciones generadas con drizzle-kit."
-- "Haz el trabajo para la casa: tabla `albums` con `onDelete: 'set null'`, segunda migración con `note` y `favorite`, pantalla `foto/[id]`, búsqueda y filtros con `useLiveQuery` y fotos permanentes con expo-file-system."
-- "No sirve el botón de marcar como favorita." → La IA encontró que las consultas de Drizzle no se ejecutaban (ver Corrección 6).
-- "Me da este problema en el iPhone: Could not connect to development server." → Reiniciar `npx expo start -c` y volver a escanear el QR, o usar `--tunnel`.
+- "Ayúdame con la Guía Semana 8 paso a paso sobre GeoCam: proyecto en Supabase, login con correo y contraseña, sesión guardada en SecureStore y rutas protegidas con `Stack.Protected`."
+- "Crea el SQL de la tabla `photos` con RLS por dueño y un bucket privado `geocam` con una carpeta por usuario."
+- "Agrega a SQLite los campos de sincronización (`clientId`, `updatedAt`, `remotePath`, `syncedAt`) con una migración de drizzle-kit, sin perder las fotos de la Semana 7."
+- "Haz el trabajo para la casa: botón Sincronizar con avance, subida sin duplicados ni archivos huérfanos, borrado coherente, pestaña Nube con tiempo real y fotos separadas por usuario."
+- "Me sale este error al generar la migración: `TransformError ... react-native/index.js: Unexpected "typeof"`." → Ver Corrección 1.
 
 ## 2. Código Generado vs. Código Modificado
 
-### Corrección 1 — Fusionar `babel.config.js` y `metro.config.js` con NativeWind
-- **Qué propone la guía:** un `babel.config.js` con solo `presets: ['babel-preset-expo']` y un `metro.config.js` que exporta `config` directamente.
-- **Problema:** copiarlos tal cual borra la configuración de NativeWind de la Semana 2 (`jsxImportSource: 'nativewind'`, `nativewind/babel` y `withNativeWind`), y todos los `className` dejarían de funcionar.
-- **Qué modificamos:** conservamos los presets de NativeWind y solo agregamos `plugins: [['inline-import', { extensions: ['.sql'] }]]`. En Metro, `config.resolver.sourceExts.push('sql')` va **antes** de `withNativeWind`.
+### Corrección 1 — `expo-crypto` dentro de `db/schema.ts` rompe drizzle-kit
+- **Qué propone la guía:** `clientId: text('client_id').$defaultFn(() => Crypto.randomUUID())` importando `expo-crypto` en el esquema.
+- **Problema:** `drizzle-kit generate` se ejecuta en **Node**, no en el teléfono. Al leer el esquema intenta cargar `expo-crypto` → `react-native`, y falla con `TransformError ... Unexpected "typeof"`.
+- **Qué modificamos:** el esquema quedó sin imports de Expo (`clientId: text('client_id').unique()`) y el UUID se genera en el repositorio: `photosRepo.create()` y `ensureSyncFields()` usan `Crypto.randomUUID()`. Así la migración `0002_sync_fields` se generó sin errores.
 
-### Corrección 2 — TypeScript no reconocía los `.sql`
-- `npx tsc --noEmit` fallaba al importar las migraciones. Agregamos `declare module "*.sql"` en `nativewind-env.d.ts`.
+### Corrección 2 — `markSynced` no debe tocar `updatedAt`
+- **Riesgo:** si al marcar la foto como subida se actualiza también `updatedAt`, la foto vuelve a quedar **pendiente** para siempre (`syncedAt < updatedAt`).
+- **Qué hicimos:** `markSynced(id, remotePath)` solo escribe `remotePath` y `syncedAt`. En cambio, `update()` (nota, favorita, álbum) **siempre** escribe `updatedAt = new Date()`, para que una edición después de subir vuelva a marcarla como pendiente.
 
-### Corrección 3 — Del objeto `coords` a columnas planas, y `id` numérico
-- **Antes:** `GeoPhoto.coords: Coords | null` e `id: string`.
-- **Ahora:** `latitude`, `longitude` y `accuracy` son columnas `real` opcionales, y `usePhotos.addPhoto` hace `coords?.latitude ?? null`. El `id` es `integer autoincrement`.
+### Corrección 3 — Subir con `Blob`/`FormData` crea archivos de 0 bytes
+- **Qué suele generar la IA:** `fetch(uri).then(r => r.blob())` o un `FormData`.
+- **Problema:** en React Native eso sube archivos vacíos a Storage.
+- **Qué usamos:** `fetch(uri).then(r => r.arrayBuffer())`, y además se comprueba que el archivo exista (`new File(uri).exists`) y que `byteLength > 0` antes de subir.
 
-### Corrección 4 — `drizzle-kit` omitió `ON DELETE SET NULL` (C1)
-- **Qué generó la herramienta:** la migración `0001` contiene `ALTER TABLE photos ADD album_id integer REFERENCES albums(id);` **sin** `ON DELETE SET NULL`, aunque el esquema dice `onDelete: 'set null'`.
-- **Cómo lo detectamos:** aplicamos las dos migraciones en SQLite con `PRAGMA foreign_keys = ON`, asignamos una foto a un álbum e intentamos borrarlo. Resultado: `FOREIGN KEY constraint failed`.
-- **Qué modificamos:** la guía prohíbe editar migraciones a mano, así que `albumsRepo.remove` hace el `SET NULL` en una transacción: primero `UPDATE photos SET album_id = NULL WHERE album_id = ?` y después `DELETE FROM albums`. En el iPhone, al borrar el álbum "Casa", la foto del ventilador quedó "Sin álbum" y no se borró.
+### Corrección 4 — Subida idempotente, sin duplicados ni huérfanos (C2)
+- La ruta siempre es `<user_id>/<client_id>.jpg`, y `client_id` y `storage_path` son `unique` en PostgreSQL.
+- Antes de subir se busca la fila por `client_id`: si ya existe, solo se actualizan los metadatos (política **UPDATE** en la tabla).
+- Si el archivo sube pero el `insert` de la fila falla, se borra el archivo con `storage.remove([path])`.
+- Se usa `upsert: true` para reemplazar un archivo huérfano de un intento anterior. Esto exige políticas **INSERT, SELECT y UPDATE** en `storage.objects`, que la guía no incluía completas.
 
-### Corrección 5 — Transacción async en un driver síncrono
-- **Qué generó la IA:** `await db.transaction(async (tx) => { await tx.update(...); await tx.delete(...); })`.
-- **Problema:** el driver `expo-sqlite` de Drizzle es **síncrono** (`BaseSQLiteDatabase<'sync'>`). Con un callback async, el `COMMIT` ocurre antes de que se ejecute el `delete`, así que la segunda sentencia queda fuera de la transacción.
-- **Qué modificamos:** callback síncrono con `.run()` en cada sentencia.
+### Corrección 5 — Borrado coherente (C3)
+- **Orden:** primero la fila remota, luego el archivo del bucket, y solo si ambos salen bien se borra la fila local y el archivo del teléfono.
+- Sin conexión se lanza el error, la pantalla muestra "Sin conexión… No se borró nada" y la foto queda intacta en ambos lados. Repetir el borrado es seguro.
+- Al agitar el teléfono (`clearAll`), las fotos que no se pudieron borrar de la nube se conservan y se informa cuántas.
 
-### Corrección 6 — El botón "Marcar como favorita" no hacía nada
-- **Qué generó la IA:** `const setFavorite = (fav) => photosRepo.update(id, { favorite: fav })`, y la pantalla la llamaba con `void setFavorite(...)`.
-- **Problema detectado al probar en el iPhone:** las consultas de Drizzle son **perezosas** y solo se ejecutan con `await`, `.then()` o `.run()`. `void` descarta el objeto sin ejecutarlo, así que no se guardaba nada. Lo mismo pasaba al mover la foto de álbum. "Guardar nota" sí funcionaba porque la pantalla usaba `await`.
-- **Qué modificamos:** en `hooks/usePhoto.ts` las acciones son `async` y hacen `await photosRepo.update(...)`.
+### Corrección 6 — Fotos separadas por usuario también en SQLite (C5)
+- **Problema:** RLS separa las fotos en Supabase, pero la base local del teléfono es una sola. Con otra cuenta se verían las fotos del usuario anterior.
+- **Qué modificamos:** tercera migración `0003_owner_id` (`ALTER TABLE photos ADD owner_id text`). Todas las consultas de `photosRepo` reciben el `ownerId` de la sesión (`hooks/useUserId.ts`), y `useLiveQuery` usa `[userId]` como dependencia. `ensureSyncFields(userId)` asigna las fotos antiguas (sin dueño) al primer usuario que inicia sesión.
+- Los álbumes siguen siendo locales y compartidos (no se sincronizan en esta semana).
 
-### Corrección 7 — `File.copy()` es asíncrono en SDK 57 (C5)
-- **Qué propone la guía:** `source.copy(destination); return destination.uri;`, de forma síncrona.
-- **Problema:** en `node_modules/expo-file-system/build/internal/NativeFileSystem.types.d.ts` del SDK 57, `copy()` devuelve `Promise<void>` (existe aparte `copySync`). Sin `await` se guardaría en SQLite una ruta que todavía no existe.
-- **Qué modificamos:** `persistPhoto` es `async` y hace `await source.copy(destination)`. Además, `deletePhotoFile` solo borra archivos dentro de `documents/photos/`, para nunca tocar la galería ni la caché.
+### Corrección 7 — Navegación con `Stack.Protected`, sin `router.replace`
+- Tras el login o el logout no se navega a mano: `Stack.Protected guard={!!session}` muestra las pestañas y `guard={!session}` muestra `login`. Al cambiar la sesión, Expo Router redirige solo.
 
 ## 3. Alucinaciones o Errores Detectados
 
-| Error típico (tabla de la guía) | ¿Apareció? | Qué usamos |
+| Error típico | ¿Apareció? | Qué usamos |
 |---|---|---|
-| `SQLite.openDatabase` / `tx.executeSql` | No | `openDatabaseSync` |
-| `drizzle-orm/better-sqlite3` | No | `drizzle-orm/expo-sqlite` |
-| `drizzle.config.ts` sin `driver: 'expo'` | No | Se genera `drizzle/migrations.js` |
-| Falta `inline-import` o `sql` en Metro | No | Configurado; el bundle incluye el `CREATE TABLE` |
-| `drizzle-kit push` | No | Solo `drizzle-kit generate` + `useMigrations` |
-| Base sin `enableChangeListener` | No | Activado; la lista se actualiza sola |
-| Llaves foráneas sin `PRAGMA foreign_keys = ON` | No | Se ejecuta al abrir la conexión |
-| `FileSystem.copyAsync` mezclado con `new File()` | No | Solo la API nueva (`File`, `Directory`, `Paths`) |
-
-Errores reales encontrados además de la tabla: `ON DELETE SET NULL` omitido por drizzle-kit (Corrección 4), transacción async (Corrección 5), consultas perezosas con `void` (Corrección 6) y `copy()` asíncrono (Corrección 7).
+| Guardar la sesión en `AsyncStorage` | No | `SecureStore` por partes de 1000 caracteres (`lib/secureStorage.ts`) |
+| Poner la `service_role` / `sb_secret_…` en la app | No | Solo la **publishable key** en `.env` con prefijo `EXPO_PUBLIC_` |
+| Bucket público | No | Bucket privado + URL firmadas de 1 hora |
+| Tablas sin RLS | No | RLS activado con `(select auth.uid()) = user_id` en las 4 operaciones |
+| `detectSessionInUrl: true` en móvil | No | `false` + `startAutoRefresh` / `stopAutoRefresh` con `AppState` |
+| Canal de Realtime sin limpiar | No | `supabase.removeChannel(channel)` en el cleanup del `useEffect` |
+| `expo-crypto` en el esquema | **Sí** | Ver Corrección 1 |
+| Subir con `Blob` | Evitado | `arrayBuffer()` (Corrección 3) |
 
 ## 4. Verificación en dispositivo (iPhone, Expo Go SDK 57)
 
 | Prueba | Resultado |
 |---|---|
 | `npx tsc --noEmit` | ✅ Sin errores |
-| T6: 3 fotos → cerrar Expo Go → reabrir | ✅ "3 en el mapa" |
-| C2: segunda migración sobre las fotos de la clase | ✅ Las 3 fotos siguen |
-| C3: nota "Ventilador" + favorita | ✅ Se guardan y la lista se actualiza sola |
-| C4: filtro ★ Favoritas | ✅ Solo aparece el ventilador |
-| C1: foto en álbum "Casa" → borrar el álbum | ✅ La foto queda "Sin álbum" |
-| C5: foto nueva | ✅ Aparece con su miniatura (copiada a `documents/photos/`) |
-| C3: eliminar foto | ✅ Desaparece de la lista |
+| T2: registro, login y sesión que sobrevive al cierre de la app | ⏳ |
+| T2: cerrar sesión → vuelve al login | ⏳ |
+| T5: subir una foto → aparece en Storage dentro de la carpeta del usuario (más de 0 bytes) | ⏳ |
+| C1: Sincronizar muestra "Subiendo X de Y" y el resumen final | ⏳ |
+| C2: sincronizar de nuevo no crea duplicados; editar la nota → "Actualizar en la nube" | ⏳ |
+| C3: eliminar una foto sincronizada la borra de la tabla y del bucket | ⏳ |
+| C4: pestaña Nube con URL firmadas y cambios en tiempo real | ⏳ |
+| C5: una segunda cuenta no ve las fotos de la primera | ⏳ |
+
+## 5. Seguridad (C6)
+
+- `.env` está en `.gitignore` y nunca se subió: `git log --all --full-history -- .env` no devuelve nada.
+- En el repositorio solo está `.env.example`, sin valores reales.
+- En el código no hay `service_role`, `sb_secret_` ni la contraseña de la base de datos.
+- Durante el trabajo la contraseña de la base se pegó por error en el chat con la IA. Se **restableció** en Supabase → Project Settings → Database → Reset database password. La app no la usa.
 
 ### Problemas de entorno
-- **Login de Expo Go:** "You're signed in to Expo CLI as leohv, but not signed in to Expo Go". Se resolvió iniciando sesión en Expo Go con la misma cuenta.
-- **"Could not connect to development server":** se resolvió reiniciando `npx expo start -c` y escaneando el QR nuevo.
+- **Traductor de Brave:** al traducir el panel de Supabase al español la página fallaba (`removeChild`). Se resolvió dejando la página en inglés.
+- **Red lenta:** `npm` daba `ENOTFOUND` y Expo Go daba "request timed out". Se resolvió reintentando después de `npm ping` y con `npx expo start --tunnel`.

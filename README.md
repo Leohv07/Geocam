@@ -1,6 +1,6 @@
-# GeoCam 📸🌎 — Semanas 6 y 7: Sensores + SQLite offline-first
+# GeoCam 📸🌎 — Semanas 6, 7 y 8: Sensores + SQLite offline-first + Supabase
 
-> **Semana 7:** las fotos y sus coordenadas ahora se guardan en **SQLite con Drizzle ORM** y sobreviven al cierre de la app. Ver la sección [Semana 7](#semana-7--geocam-persistente-sqlite--drizzle).
+> **Semana 8:** GeoCam ahora tiene **cuentas de usuario y respaldo en la nube con Supabase**. Las fotos se siguen guardando primero en el teléfono (SQLite) y se suben a PostgreSQL + Storage sin duplicados. Ver la sección [Semana 8](#semana-8--respaldo-en-la-nube-con-supabase).
 
 Cámara que etiqueta cada foto con coordenadas GPS, las muestra en un mapa y reacciona al movimiento del teléfono. Todo el hardware está encapsulado en **Custom Hooks tipados** (sin `any`), con permisos pedidos **en contexto** y **limpieza de todas las suscripciones**.
 
@@ -15,10 +15,11 @@ Cámara que etiqueta cada foto con coordenadas GPS, las muestra en un mapa y rea
 |---|---|
 | Expo SDK | 57 |
 | React Native | 0.86 (New Architecture) |
-| Expo Router | `app/(tabs)` con 3 pestañas + ruta `foto/[id]` |
+| Expo Router | `app/(tabs)` con 4 pestañas + `foto/[id]` + `login` |
 | NativeWind | v4 (Tailwind 3) |
 | Módulos nativos | `expo-camera`, `expo-location`, `expo-image-picker`, `expo-sensors`, `react-native-maps` |
-| Base local (Semana 7) | `expo-sqlite` + `drizzle-orm` 0.45, migraciones con `drizzle-kit` 0.31, `expo-file-system` (API `File`/`Directory`/`Paths`) |
+| Base local (Semana 7) | `expo-sqlite` + `drizzle-orm` 0.45, migraciones con `drizzle-kit` 0.31, `expo-file-system` |
+| Nube (Semana 8) | `@supabase/supabase-js` 2.x (Auth, PostgreSQL, Storage, Realtime), `expo-secure-store`, `expo-crypto` |
 
 > Todos los módulos se instalaron con `npx expo install`, no con `npm install`, para usar la versión compatible con el SDK.
 
@@ -26,11 +27,14 @@ Cámara que etiqueta cada foto con coordenadas GPS, las muestra en un mapa y rea
 
 ```bash
 npm install
-npx expo start          # misma red Wi-Fi que el teléfono
-npx expo start --tunnel # si la red bloquea la conexión
+cp .env.example .env     # y completar con la URL y la publishable key de tu proyecto Supabase
+npx expo start -c        # misma red Wi-Fi que el teléfono
+npx expo start --tunnel  # si la red bloquea la conexión
 ```
 
-Escanea el QR con **Expo Go** en un **teléfono físico**: la cámara no funciona en el simulador de iOS.
+1. En Supabase → **SQL Editor**, ejecuta completo [`supabase/schema.sql`](./supabase/schema.sql).
+2. En **Authentication → Sign In / Providers → Email**, desactiva **Confirm email** para poder probar sin correo.
+3. Escanea el QR con **Expo Go** en un **teléfono físico**: la cámara no funciona en el simulador de iOS.
 
 > **Nota:** la versión de Expo Go del teléfono debe corresponder al SDK del proyecto (campo `expo` en `package.json`).
 
@@ -38,99 +42,222 @@ Escanea el QR con **Expo Go** en un **teléfono físico**: la cámara no funcion
 
 ```
 app/
-  _layout.tsx            Stack raíz + useMigrations (Semana 7)
-  index.tsx              Redirige a /geocam
+  _layout.tsx            useMigrations → AuthProvider → Stack.Protected (Semanas 7 y 8)
+  index.tsx              Redirige a /geocam o /login según la sesión
+  login.tsx              Iniciar sesión / crear cuenta (Semana 8)
   (tabs)/
-    _layout.tsx          Tabs GeoCam + Fotos + Mapa
+    _layout.tsx          Tabs GeoCam + Fotos + Nube + Mapa
     geocam.tsx           Cámara, galería (R2), agitar (R4), nivel, ubicación aproximada
-    fotos.tsx            Lista con búsqueda y filtros (C4)
+    fotos.tsx            Lista con búsqueda y filtros + botón Sincronizar (C1) + cerrar sesión
+    nube.tsx             Fotos guardadas en Supabase, en tiempo real (C4)
     mapa.tsx             Mapa con markers + lista "Sin ubicación" (R3)
-  foto/[id].tsx          Detalle: nota, favorita, álbum, eliminar (C3)
+  foto/[id].tsx          Detalle: nota, favorita, álbum, subir a la nube (T5), eliminar (C3)
 components/
   PermissionPrimer.tsx   Pantalla previa de explicación / "Abrir Ajustes"
   PhotoThumb.tsx         Miniatura con insignia CAM (verde) / GAL (azul)
+context/
+  AuthContext.tsx        Sesión de Supabase: session, signIn, signUp, signOut (Semana 8)
 hooks/
   useGeoLocation.ts      Permiso + lectura única + seguimiento con bandera cancelled
   useCamera.ts           Permiso + captura con guarda isCapturing
   useShake.ts            Acelerómetro: umbral de magnitud + cooldown (R4)
   useLevel.ts            Indicador de nivel (reto opcional)
-  usePhotos.ts           useLiveQuery + addPhoto / removePhoto / clearAll (T4, C5)
-  usePhoto.ts            Una foto + editar nota / favorita / álbum (C3)
-  useAlbums.ts           Listar, crear y borrar álbumes (C1)
-  usePhotoSearch.ts      Búsqueda y filtros reactivos (C4)
-db/                     (Semana 7)
-  schema.ts              Tablas albums y photos + tipos inferidos
+  useUserId.ts           id del usuario de la sesión (C5)
+  usePhotos.ts           useLiveQuery + addPhoto / removePhoto / clearAll
+  usePhoto.ts            Una foto + editar + subir a la nube (T5) + borrar (C3)
+  useAlbums.ts           Listar, crear y borrar álbumes
+  usePhotoSearch.ts      Búsqueda y filtros reactivos
+  useSync.ts             Pendientes + Sincronizar con avance (C1)
+  useCloudPhotos.ts      Fotos remotas + URL firmadas + Realtime (C4)
+db/
+  schema.ts              Tablas albums y photos (con campos de sincronización)
   client.ts              openDatabaseSync + enableChangeListener + PRAGMA foreign_keys
-  repositories/photos.ts Consultas y CRUD de fotos (única capa con Drizzle)
+  repositories/photos.ts Consultas y CRUD de fotos filtradas por dueño (única capa con Drizzle)
   repositories/albums.ts CRUD de álbumes (SET NULL en transacción)
-drizzle/                 Migraciones 0000 y 0001 generadas con drizzle-kit (versionadas)
+drizzle/                 Migraciones 0000–0003 generadas con drizzle-kit (versionadas)
 services/
-  photoFiles.ts          Copiar y borrar fotos en documents/photos (C5)
+  photoFiles.ts          Copiar y borrar fotos en documents/photos
+  cloudPhotos.ts         Subir, sincronizar, borrar y listar en Supabase (única capa con Supabase)
 lib/
+  supabase.ts            Cliente de Supabase + auto-refresh con AppState
+  secureStorage.ts       Adaptador de SecureStore por partes de 1000 caracteres
   exif.ts                Lectura de coordenadas EXIF iOS/Android (reto opcional)
+supabase/
+  schema.sql             Tabla, políticas RLS, Realtime y bucket (Semana 8)
 types/
   geo.ts                 PermissionState, Coords, PhotoSource
 ```
 
-## Requisitos del taller (Semana 6)
+## Semana 8 — Respaldo en la nube con Supabase
 
-| Req. | Implementación |
-|---|---|
-| **R1** Estado global | En la Semana 6 era `GeoPhotosContext` con `useReducer`. **En la Semana 7 se reemplazó por SQLite** (`hooks/usePhotos.ts`). |
-| **R2** Galería | Botón **GAL**. Usa `launchImageLibraryAsync({ mediaTypes: ['images'] })` y guarda `source: 'gallery'` con las coordenadas actuales o `null`. Estas fotos llevan borde e insignia azules y un marker azul. |
-| **R3** Mapa | Un `Marker` por cada foto con coordenadas; al tocarlo aparece una tarjeta con la miniatura. Las fotos sin coordenadas se listan aparte en **"Sin ubicación"**. El mapa se centra en tu ubicación o, sin permiso, en la última foto. |
-| **R4** `useShake` | 1. `isAvailableAsync()` → 2. `setUpdateInterval(100)` → 3. umbral sobre √(x²+y²+z²) (1.8 g) → 4. cooldown de 1500 ms → 5. limpieza con bandera `cancelled`. Al agitar aparece un `Alert` que pregunta si se borran todas las fotos. |
-| **R5** AI-LOG | Ver [`docs/AI-LOG-semana6.md`](./docs/AI-LOG-semana6.md). |
+El teléfono sigue siendo la **fuente principal** (offline-first): la foto se guarda en SQLite al tomarla y se sube a Supabase cuando el usuario lo pide, una por una o con **Sincronizar**.
 
-### Retos opcionales incluidos
-- **Nivel**: `useLevel` calcula la inclinación a partir de la gravedad y la línea se pone verde entre ±2°. Los comentarios de `hooks/useLevel.ts` explican por qué no se integró el giroscopio.
-- **EXIF de galería**: con `exif: true`, `lib/exif.ts` normaliza el formato de iOS (`{GPS}.Latitude` + `LatitudeRef`) y el de Android (`GPSLatitude` como racional `"11/1,32/1,3840/100"`). Las claves GPS recibidas se imprimen en consola con `[EXIF]`.
-- **Ubicación aproximada**: si `accuracy > 1000 m` se muestra un aviso naranja.
-
-## Semana 7 — GeoCam persistente (SQLite + Drizzle)
-
-El `GeoPhotosContext` en memoria de la Semana 6 se reemplazó por **SQLite con Drizzle ORM**. Las fotos, sus coordenadas, notas, favoritas y álbumes sobreviven al cierre de la app, y los archivos de imagen se guardan en la carpeta de documentos.
-
-### Arquitectura por capas
+### Arquitectura: dos bases de datos
 
 ```
-Pantallas  app/(tabs)/geocam.tsx · fotos.tsx · mapa.tsx · app/foto/[id].tsx
-   ↓ usan
-Hooks      usePhotos · usePhoto · useAlbums · usePhotoSearch   (useLiveQuery + acciones)
-   ↓ llaman
-Repos      db/repositories/photos.ts · albums.ts               (única capa que importa Drizzle)
-   ↓                                    services/photoFiles.ts (expo-file-system)
-Drizzle    db/schema.ts · db/client.ts
-   ↓
-expo-sqlite → geocam.db en el dispositivo
+                 📱 iPhone (offline-first)                                ☁️ Supabase
+┌──────────────────────────────────────────────┐          ┌─────────────────────────────────────────┐
+│ Pantallas  geocam · fotos · nube · mapa ·    │          │ Auth        correo + contraseña         │
+│            foto/[id] · login                 │          │             (sesión → SecureStore)      │
+│    ↓ usan                                    │          │                                         │
+│ Hooks      usePhotos · usePhoto · useSync ·  │          │ PostgreSQL  public.photos  (RLS)        │
+│            useCloudPhotos · useUserId        │          │   user_id = auth.uid()                  │
+│    ↓ llaman                                  │  subir   │   client_id UNIQUE ◄────────────┐       │
+│ photosRepo (Drizzle) │ cloudPhotos (Supabase)├─────────►│   storage_path UNIQUE           │       │
+│    ↓                 │                       │  borrar  │                                 │ mismo │
+│ SQLite  geocam.db    │                       │          │ Storage     bucket privado      │ UUID  │
+│   photos.client_id ──┼───────────────────────┼──────────┼───► geocam/<user_id>/<client_id>.jpg   │
+│   photos.owner_id    │                       │ Realtime │                                         │
+│   synced_at / updated_at                     │◄─────────┤ supabase_realtime → pestaña Nube        │
+│ documents/photos/*.jpg                       │          │                                         │
+└──────────────────────────────────────────────┘          └─────────────────────────────────────────┘
 ```
 
-Las pantallas no importan nada de Drizzle: los tipos `Photo` y `Album` se re-exportan desde los hooks. Solo `app/_layout.tsx` usa `useMigrations`, como indica la guía.
+- **`client_id`** es un UUID creado en el teléfono. Identifica la misma foto en SQLite, en PostgreSQL y en la ruta del archivo, y por eso no se duplica.
+- **Pendiente** = `synced_at IS NULL OR synced_at < updated_at`. Cada edición escribe `updated_at`; subir solo escribe `synced_at`.
+- Las pantallas no importan Drizzle ni Supabase: todo pasa por hooks, `db/repositories` y `services/cloudPhotos.ts`.
 
-### Diagrama de tablas
+### Tablas
 
 ```
-albums                              photos
-┌─────────────────────────────┐     ┌────────────────────────────────┐
-│ id          integer PK      │◄─┐  │ id          integer PK         │
-│ name        text UNIQUE     │  │  │ uri         text NOT NULL      │
-│ created_at  integer (ms)    │  │  │ latitude    real (null)        │
-└─────────────────────────────┘  │  │ longitude   real (null)        │
-                                 │  │ accuracy    real (null)        │
-   1 álbum ─── 0..N fotos        │  │ source      camera | gallery   │
-   al borrar el álbum:           │  │ created_at  integer (ms)       │
-   album_id = NULL (SET NULL)    └──┤ album_id    integer FK (null)  │ ← C1
-                                    │ note        text (null)        │ ← C2
-                                    │ favorite    boolean = false    │ ← C2
-                                    └────────────────────────────────┘
+SQLite (teléfono) — photos                    PostgreSQL (Supabase) — public.photos
+┌───────────────────────────────────┐          ┌──────────────────────────────────────────┐
+│ id          integer PK            │          │ id           bigint identity PK          │
+│ uri         text                  │          │ user_id      uuid → auth.users (cascade) │
+│ latitude / longitude / accuracy   │  ─────►  │ latitude / longitude                     │
+│ source      camera | gallery      │  ─────►  │ source       check camera | gallery      │
+│ created_at  integer (ms)          │  ─────►  │ taken_at     timestamptz                 │
+│ album_id    FK albums (null)      │          │                                          │
+│ note / favorite                   │  ─────►  │ note / favorite                          │
+│ client_id   text UNIQUE      (T4) │  ═════►  │ client_id    uuid UNIQUE                 │
+│ updated_at  integer          (T4) │  ─────►  │ updated_at   timestamptz                 │
+│ remote_path text             (T4) │  ═════►  │ storage_path text UNIQUE                 │
+│ synced_at   integer          (T4) │          │ created_at   timestamptz default now()   │
+│ owner_id    text             (C5) │          └──────────────────────────────────────────┘
+└───────────────────────────────────┘
 ```
 
-### Migraciones (generadas con `npx drizzle-kit generate`, ninguna editada a mano)
+### SQL completo de Supabase ([`supabase/schema.sql`](./supabase/schema.sql))
+
+```sql
+create table public.photos (
+  id bigint generated always as identity primary key,
+  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  client_id uuid not null unique,
+  storage_path text not null unique,
+  latitude double precision,
+  longitude double precision,
+  note text,
+  favorite boolean not null default false,
+  source text not null check (source in ('camera', 'gallery')),
+  taken_at timestamptz not null,
+  updated_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.photos enable row level security;
+
+create policy "ver las mías" on public.photos
+  for select to authenticated using ((select auth.uid()) = user_id);
+create policy "crear las mías" on public.photos
+  for insert to authenticated with check ((select auth.uid()) = user_id);
+create policy "actualizar las mías" on public.photos
+  for update to authenticated
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy "borrar las mías" on public.photos
+  for delete to authenticated using ((select auth.uid()) = user_id);
+
+alter publication supabase_realtime add table public.photos;
+
+insert into storage.buckets (id, name, public) values ('geocam', 'geocam', false);
+
+create policy "subir a mi carpeta" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'geocam' and (storage.foldername(name))[1] = (select auth.uid()::text));
+create policy "leer mi carpeta" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'geocam' and (storage.foldername(name))[1] = (select auth.uid()::text));
+create policy "reemplazar en mi carpeta" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'geocam' and (storage.foldername(name))[1] = (select auth.uid()::text))
+  with check (bucket_id = 'geocam' and (storage.foldername(name))[1] = (select auth.uid()::text));
+create policy "borrar de mi carpeta" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'geocam' and (storage.foldername(name))[1] = (select auth.uid()::text));
+```
+
+### Migraciones locales (generadas con `npm run db:generate`, ninguna editada a mano)
 
 | Archivo | Contenido |
 |---|---|
-| `drizzle/0000_init_photos.sql` | `CREATE TABLE photos` (taller en clase) |
-| `drizzle/0001_albums_note_favorite.sql` | `CREATE TABLE albums` + índice único `name` + `ALTER TABLE photos ADD album_id / note / favorite` |
+| `drizzle/0000_init_photos.sql` | `CREATE TABLE photos` (Semana 7) |
+| `drizzle/0001_albums_note_favorite.sql` | Tabla `albums` + `album_id`, `note`, `favorite` (Semana 7) |
+| `drizzle/0002_sync_fields.sql` | `client_id` (índice único), `updated_at`, `remote_path`, `synced_at` (T4) |
+| `drizzle/0003_owner_id.sql` | `owner_id` (C5) |
+
+Las fotos anteriores reciben `client_id` y `owner_id` en `photosRepo.ensureSyncFields()` al iniciar sesión, así que **no se pierde ninguna**.
+
+### Taller en clase (T1–T6)
+
+| Req. | Implementación |
+|---|---|
+| **T1** | Proyecto Supabase + `@supabase/supabase-js`, `expo-secure-store`, `expo-crypto`. `.env` con `EXPO_PUBLIC_SUPABASE_URL` y `EXPO_PUBLIC_SUPABASE_KEY` (publishable). `.env` en `.gitignore`, `.env.example` versionado. |
+| **T2** | `lib/supabase.ts` (sesión en SecureStore, `detectSessionInUrl: false`, auto-refresh con `AppState`), `context/AuthContext.tsx`, `app/login.tsx` y `Stack.Protected` en `app/_layout.tsx`. |
+| **T3** | `supabase/schema.sql`: tabla `photos` con RLS en las 4 operaciones y bucket **privado** `geocam` con una carpeta por usuario. |
+| **T4** | Migración `0002_sync_fields`: `clientId`, `updatedAt`, `remotePath`, `syncedAt`. `update()` siempre escribe `updatedAt`; `markSynced()` no lo toca. |
+| **T5** | Botón **☁️ Subir a la nube** en `foto/[id]`: `uploadPhoto()` sube el archivo como `ArrayBuffer` a `<user_id>/<client_id>.jpg` y crea la fila. |
+| **T6** | Ver capturas: la foto aparece en **Table Editor** y en **Storage** dentro de la carpeta del usuario. |
+
+### Trabajo para la casa (C1–C7)
+
+| Req. | Implementación | Archivos |
+|---|---|---|
+| **C1** Sincronizar | Botón en **Fotos** con el número de pendientes, avance "Subiendo 3 de 7…" y resumen "Subidas X de Y". Si una foto falla, las demás continúan. | `hooks/useSync.ts`, `services/cloudPhotos.ts` (`syncPending`) |
+| **C2** Sin duplicados ni huérfanos | Mismo `client_id` → misma ruta. Si la fila ya existe, solo se actualizan los metadatos (botón "Actualizar en la nube"). Si la fila falla después de subir el archivo, el archivo se borra. | `services/cloudPhotos.ts` (`uploadPhoto`) |
+| **C3** Borrado coherente | Primero se borran la fila remota y el archivo del bucket, después la foto local. Sin conexión: "No se borró nada". | `deleteRemotePhoto`, `hooks/usePhotos.ts`, `hooks/usePhoto.ts` |
+| **C4** Pestaña Nube | Lista de `public.photos` con URL firmadas (1 h) y canal Realtime filtrado por `user_id`, limpiado con `removeChannel`. | `app/(tabs)/nube.tsx`, `hooks/useCloudPhotos.ts` |
+| **C5** Fotos por usuario | RLS en PostgreSQL y Storage + `owner_id` en SQLite: cada consulta local filtra por el usuario de la sesión. | `drizzle/0003_owner_id.sql`, `hooks/useUserId.ts`, `db/repositories/photos.ts` |
+| **C6** Auditoría de secretos | Ver la sección siguiente. | `.gitignore`, `.env.example` |
+| **C7** Documentación | Este README + `AI-LOG.md` + GIF. | — |
+
+### C6 — Auditoría de secretos
+
+| Comprobación | Resultado |
+|---|---|
+| `git log --all --full-history -- .env` | Sin resultados: `.env` nunca se subió |
+| `.env.example` en el repositorio | ✅ Solo con valores de ejemplo |
+| Búsqueda de `sb_secret_` y `service_role` en el código | Sin resultados |
+| Clave usada en la app | Solo la **publishable key**, que es pública y está protegida por RLS |
+| Contraseña de la base de datos | No se usa en la app; se restableció después de compartirla por error |
+
+### Capturas (iPhone, Expo Go SDK 57)
+
+| T2: login | T5: subir a la nube | C1: sincronizar |
+|---|---|---|
+| ![login](docs/s8-login.png) | ![subir](docs/s8-subir.png) | ![sincronizar](docs/s8-sincronizar.png) |
+
+| T6: tabla en Supabase | T6: Storage con la carpeta del usuario | C4: pestaña Nube |
+|---|---|---|
+| ![tabla](docs/s8-tabla.png) | ![storage](docs/s8-storage.png) | ![nube](docs/s8-nube.png) |
+
+| C5: segunda cuenta sin fotos de la primera | C3: borrado en ambos lados |
+|---|---|
+| ![otra cuenta](docs/s8-otra-cuenta.png) | ![borrado](docs/s8-borrado.png) |
+
+**GIF:** tomar foto → Sincronizar → aparece sola en la pestaña Nube.
+
+![demo](docs/s8-demo.gif)
+
+### Limitaciones
+- La sincronización es **en un solo sentido** (teléfono → nube). Las fotos de otro teléfono no se descargan a SQLite; solo se ven en la pestaña Nube.
+- Los álbumes siguen siendo locales y no se suben.
+- Las fotos antiguas sin dueño quedan asignadas al **primer** usuario que inicia sesión en el teléfono.
+
+---
+
+## Semana 7 — GeoCam persistente (SQLite + Drizzle)
+
+El `GeoPhotosContext` en memoria de la Semana 6 se reemplazó por **SQLite con Drizzle ORM**. Las fotos, sus coordenadas, notas, favoritas y álbumes sobreviven al cierre de la app, y los archivos de imagen se guardan en la carpeta de documentos. El AI-LOG de esa semana está en [`docs/AI-LOG-semana7.md`](./docs/AI-LOG-semana7.md).
 
 ### Taller en clase (T1–T6)
 
@@ -138,9 +265,9 @@ albums                              photos
 |---|---|
 | **T1** | `expo-sqlite`, `drizzle-orm`, `drizzle-kit`, `babel-plugin-inline-import`. `drizzle.config.ts` con `driver: 'expo'`. `babel.config.js` **fusionado** con los presets de NativeWind. `metro.config.js` con `sourceExts.push('sql')` dentro de `withNativeWind`. |
 | **T2** | `db/client.ts`: `openDatabaseSync('geocam.db', { enableChangeListener: true })` + `PRAGMA foreign_keys = ON`. `app/_layout.tsx` muestra un loader hasta que `useMigrations` termina. |
-| **T3** | `photosRepo`: `listQuery`, `withLocationQuery` (`isNotNull`), `create`, `remove`, `clearAll`. |
-| **T4** | `usePhotos`: `photos`, `photosWithLocation`, `addPhoto({ uri, coords, source })` (convierte `coords?.latitude ?? null`), `removePhoto(id)`. |
-| **T5** | GeoCam y Mapa usan `usePhotos`. Al agitar se llama a `clearAll` → `photosRepo.clearAll()`. |
+| **T3** | `photosRepo`: `listQuery`, `withLocationQuery` (`isNotNull`), `create`, `remove`. |
+| **T4** | `usePhotos`: `photos`, `photosWithLocation`, `addPhoto({ uri, coords, source })`, `removePhoto(id)`. |
+| **T5** | GeoCam y Mapa usan `usePhotos`. Al agitar se llama a `clearAll`. |
 | **T6** | ✅ 3 fotos → cerrar Expo Go → reabrir → **3 en el mapa**. |
 
 | Antes de cerrar la app | Después de reabrirla |
@@ -149,16 +276,13 @@ albums                              photos
 
 ### Trabajo para la casa (C1–C6)
 
-| Req. | Implementación | Archivos |
-|---|---|---|
-| **C1** Álbumes | Tabla `albums` (`name` único). `photos.album_id` con `references(..., { onDelete: 'set null' })`. Crear álbum desde el detalle; mantener presionado el chip para eliminarlo. | `db/schema.ts`, `db/repositories/albums.ts`, `hooks/useAlbums.ts` |
-| **C2** Segunda migración | `note` (texto opcional) y `favorite` (`integer` modo `boolean`, por defecto `false`). Probada sobre un iPhone con las 3 fotos de la clase: **siguen ahí**. | `drizzle/0001_albums_note_favorite.sql` |
-| **C3** CRUD | `app/foto/[id].tsx`: ver la foto, editar la nota, marcar como favorita, mover de álbum, crear álbum y eliminar con confirmación. | `hooks/usePhoto.ts` |
-| **C4** Búsqueda y filtros | Pestaña **Fotos**: buscador por nota (`like`), chips de álbum y **★ Favoritas**, con `useLiveQuery(consulta, [search, albumId, onlyFavorites])`. | `app/(tabs)/fotos.tsx`, `hooks/usePhotoSearch.ts` |
-| **C5** Archivos permanentes | Al guardar, la foto se copia de la caché a `documents/photos/` con la API nueva (`File`, `Directory`, `Paths`) y SQLite guarda la ruta nueva. Al eliminar el registro, también se borra el archivo. | `services/photoFiles.ts`, `hooks/usePhotos.ts` |
-| **C6** Documentación | Este README + `AI-LOG.md`. | — |
-
-#### Capturas (iPhone, Expo Go SDK 57)
+| Req. | Implementación |
+|---|---|
+| **C1** Álbumes | Tabla `albums` (`name` único). `photos.album_id` con `onDelete: 'set null'`, aplicado en una transacción en `albumsRepo.remove`. |
+| **C2** Segunda migración | `note` y `favorite`. Probada con las 3 fotos de la clase: **siguen ahí**. |
+| **C3** CRUD | `app/foto/[id].tsx`: ver, editar nota, favorita, mover de álbum, crear álbum y eliminar. |
+| **C4** Búsqueda y filtros | Buscador por nota (`like`), chips de álbum y **★ Favoritas** con `useLiveQuery(consulta, deps)`. |
+| **C5** Archivos permanentes | Las fotos se copian a `documents/photos/` y se borran junto con su registro. |
 
 | C2: datos tras la 2.ª migración | C4: lista | C4: filtro ★ Favoritas |
 |---|---|---|
@@ -168,18 +292,25 @@ albums                              photos
 |---|---|---|---|
 | ![casa](docs/c1-album-casa.png) | ![borrado](docs/c1-album-borrado.png) | ![nueva](docs/c5-foto-nueva.png) | ![eliminada](docs/c3-foto-eliminada.png) |
 
-### Verificación final
-- [x] Dos migraciones generadas con `drizzle-kit generate`, ninguna editada a mano.
-- [x] Las fotos de antes de la segunda migración siguen ahí.
-- [x] Las pantallas no importan nada de Drizzle: todo pasa por hooks y repositorios.
-- [x] Crear, leer, actualizar y borrar funcionan, y los filtros se actualizan solos.
-- [x] Las fotos nuevas se guardan en `documents/photos/` y se borran junto con su registro.
-- [x] `README.md` y `AI-LOG.md` en la raíz.
+---
 
-### Limitaciones
-- Las 3 fotos tomadas en el taller **antes** de C5 conservan su ruta de caché. `deletePhotoFile` solo borra archivos dentro de `documents/photos/`, así que nunca toca la galería ni la caché del sistema.
+## Semana 6 — Sensores y permisos
 
-## Máquina de estados de permisos
+El AI-LOG de esa semana está en [`docs/AI-LOG-semana6.md`](./docs/AI-LOG-semana6.md).
+
+| Req. | Implementación |
+|---|---|
+| **R1** Estado global | En la Semana 6 era `GeoPhotosContext` con `useReducer`; en la Semana 7 se reemplazó por SQLite. |
+| **R2** Galería | Botón **GAL** con `launchImageLibraryAsync({ mediaTypes: ['images'] })`; insignia y marker azules. |
+| **R3** Mapa | Un `Marker` por foto con coordenadas; tarjeta con miniatura; lista aparte **"Sin ubicación"**. |
+| **R4** `useShake` | `isAvailableAsync()` → `setUpdateInterval(100)` → umbral sobre √(x²+y²+z²) (1.8 g) → cooldown de 1500 ms → limpieza con bandera `cancelled`. |
+
+### Retos opcionales incluidos
+- **Nivel**: `useLevel` calcula la inclinación a partir de la gravedad y la línea se pone verde entre ±2°.
+- **EXIF de galería**: `lib/exif.ts` normaliza el formato de iOS y el de Android.
+- **Ubicación aproximada**: si `accuracy > 1000 m` se muestra un aviso naranja.
+
+### Máquina de estados de permisos
 
 ```
 checking → undetermined → (acepta) → granted
@@ -187,41 +318,16 @@ checking → undetermined → (acepta) → granted
 blocked → Linking.openSettings() → (lo activa en Ajustes) → granted
 ```
 
-Al volver de Ajustes, ambos hooks **re-consultan** el permiso mediante `AppState` sin volver a pedirlo, así que la pantalla pasa sola de *blocked* a *granted*.
+### Capturas
 
-## Capturas (iPhone, Expo Go SDK 57)
-
-| Permisos concedidos + R4 agitar | R3 Mapa (foto de cámara) | R2 Galería |
+| Permisos concedidos + R4 agitar | R3 Mapa | R2 Galería |
 |---|---|---|
 | ![concedido](docs/permiso-concedido.png) | ![mapa](docs/mapa.png) | ![galeria](docs/galeria.png) |
 
-- **Concedido:** cámara activa, coordenadas en vivo (±17 m en Riohacha) e indicador de nivel (13°).
-- **R4:** al agitar en la pestaña GeoCam aparece "¿Borrar todas las fotos? Se eliminarán 2 foto(s)". Al confirmar, el mapa queda vacío.
-- **R3:** marcador **verde** = cámara y **azul** = galería. La tarjeta muestra la miniatura, las coordenadas, la fecha y el botón Eliminar.
-- **Rechazado / Bloqueado:** sin ubicación aparece un banner ámbar y la cámara sigue funcionando. Con el permiso bloqueado se muestra el botón **"Abrir Ajustes"** (`components/PermissionPrimer.tsx`). En iOS el permiso queda bloqueado tras el primer rechazo.
-
-### Log de limpieza del GPS
-Al cambiar entre las pestañas GeoCam y Mapa, la terminal muestra:
-```
-LOG  [useGeoLocation] GPS iniciado
-LOG  [useGeoLocation] cleanup: GPS detenido
-```
-
-## Verificación en el teléfono
-
-- [x] **Niega la ubicación** → la cámara sigue funcionando, aparece el banner ámbar y la foto queda en "Sin ubicación".
-- [x] **Niega la cámara dos veces en Android** → aparece "Abrir Ajustes" (estado `blocked`).
-- [x] **Sal de la pestaña GeoCam** → en la terminal debe aparecer `[useGeoLocation] cleanup: GPS detenido`.
-- [x] La app **no pide permisos al abrirse**: solo al tocar "Permitir acceso" o el banner.
-- [x] Agita el teléfono con fotos → aparece el `Alert` una sola vez.
-
-### Detalle importante: las pestañas no se desmontan
-Expo Router **mantiene montadas** las pestañas al cambiar de tab. Por eso el `cleanup` de un `useEffect` **no** se ejecutaría solo con salir de la pestaña. La solución fue usar `useIsFocused()`:
-- `useGeoLocation({ watch: isFocused })` → el efecto de seguimiento se limpia al perder el foco.
-- `useShake(..., { enabled: isFocused })` y `useLevel(isFocused)` → el acelerómetro se libera.
-- `<CameraView active={isFocused} />` → el preview de la cámara se pausa.
+### Las pestañas no se desmontan
+Expo Router **mantiene montadas** las pestañas. Por eso se usa `useIsFocused()`: `useGeoLocation({ watch: isFocused })`, `useShake(..., { enabled: isFocused })`, `useLevel(isFocused)`, `<CameraView active={isFocused} />` y, en la Semana 8, `useCloudPhotos(isFocused)` para cerrar el canal de Realtime al salir de la pestaña Nube.
 
 ## Limitaciones conocidas
-- En **Expo Go** los textos de permisos de `app.json` no se ven; aparecen los genéricos de Expo Go. Solo se ven en un build propio.
-- En **Android 10+** el sistema puede quitar la ubicación del EXIF de las fotos de galería, así que en esos casos se usa la ubicación actual.
+- En **Expo Go** los textos de permisos de `app.json` no se ven; aparecen los genéricos de Expo Go.
+- En **Android 10+** el sistema puede quitar la ubicación del EXIF de las fotos de galería.
 - En producción Android, `react-native-maps` requiere una API key de Google Maps.
