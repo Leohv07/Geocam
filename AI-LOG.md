@@ -3,7 +3,7 @@
 **Integrantes:** Leonardo Hernández, Julián Ortiz
 **Semana:** 8
 **Proyecto:** GeoCam con respaldo en la nube — Backend as a Service con Supabase (taller en clase T1–T6 + trabajo para la casa C1–C7)
-**Versiones verificadas en `package.json`:** Expo SDK 57, `@supabase/supabase-js` 2.x, `expo-secure-store` ~57.0, `expo-crypto` ~57.0, `drizzle-orm` 0.45, `drizzle-kit` 0.31
+**Versiones verificadas en `package.json`:** Expo SDK 57, `@supabase/supabase-js` ^2.118.0, `expo-secure-store` ~57.0.4, `expo-crypto` ~57.0.4, `drizzle-orm` 0.45, `drizzle-kit` 0.31
 
 > Los AI-LOG anteriores están en [`docs/AI-LOG-semana6.md`](./docs/AI-LOG-semana6.md) y [`docs/AI-LOG-semana7.md`](./docs/AI-LOG-semana7.md).
 
@@ -29,7 +29,7 @@
 ### Corrección 3 — Subir con `Blob`/`FormData` crea archivos de 0 bytes
 - **Qué suele generar la IA:** `fetch(uri).then(r => r.blob())` o un `FormData`.
 - **Problema:** en React Native eso sube archivos vacíos a Storage.
-- **Qué usamos:** `fetch(uri).then(r => r.arrayBuffer())`, y además se comprueba que el archivo exista (`new File(uri).exists`) y que `byteLength > 0` antes de subir.
+- **Qué usamos:** `fetch(uri).then(r => r.arrayBuffer())`, y además se comprueba que el archivo exista (`new File(uri).exists`) y que `byteLength > 0` antes de subir. En Storage, cada foto pesa alrededor de **1.3 MB** (`s8-storage.png`).
 
 ### Corrección 4 — Subida idempotente, sin duplicados ni huérfanos (C2)
 - La ruta siempre es `<user_id>/<client_id>.jpg`, y `client_id` y `storage_path` son `unique` en PostgreSQL.
@@ -65,25 +65,33 @@
 
 ## 4. Verificación en dispositivo (iPhone, Expo Go SDK 57)
 
-| Prueba | Resultado |
-|---|---|
-| `npx tsc --noEmit` | ✅ Sin errores |
-| T2: registro, login y sesión que sobrevive al cierre de la app | ⏳ |
-| T2: cerrar sesión → vuelve al login | ⏳ |
-| T5: subir una foto → aparece en Storage dentro de la carpeta del usuario (más de 0 bytes) | ⏳ |
-| C1: Sincronizar muestra "Subiendo X de Y" y el resumen final | ⏳ |
-| C2: sincronizar de nuevo no crea duplicados; editar la nota → "Actualizar en la nube" | ⏳ |
-| C3: eliminar una foto sincronizada la borra de la tabla y del bucket | ⏳ |
-| C4: pestaña Nube con URL firmadas y cambios en tiempo real | ⏳ |
-| C5: una segunda cuenta no ve las fotos de la primera | ⏳ |
+| Prueba | Resultado | Evidencia |
+|---|---|---|
+| `npx tsc --noEmit` | ✅ Sin errores | — |
+| T2: sin sesión se muestra el login | ✅ | `docs/s8-login.png` |
+| T2: crear cuenta inicia sesión directo (Confirm email desactivado) | ✅ Entró a GeoCam con las 3 fotos de la Semana 7 | — |
+| T2: cerrar Expo Go y reabrir | ✅ Entra sin pedir login (sesión en SecureStore) | — |
+| T5: "☁️ Subir a la nube" en el detalle | ✅ Cambia a "✅ Guardada en la nube" | `docs/s8-subir.png` |
+| T6: fila en `public.photos` | ✅ `user_id`, `client_id` y `storage_path` correctos | `docs/s8-tabla.png` |
+| T6: archivo en Storage dentro de la carpeta del usuario | ✅ `geocam/<user_id>/<client_id>.jpg`, image/jpeg, 1.3 MB | `docs/s8-storage.png` |
+| C1: Sincronizar con avance y resumen | ✅ "Subiendo 1 de 1…" → "Sincronización completa – Subidas: 1 de 1" | `docs/s8-sincronizar.png`, `docs/s8-demo.gif` |
+| C2: editar la nota de una foto ya subida y sincronizar | ✅ 6 filas (sin duplicado) y la nota "Prueba C2" actualizada en la nube | `docs/s8-tabla.png` |
+| C3: eliminar una foto sincronizada | ✅ De 6 a 5 filas y de 6 a 5 archivos en Storage | `docs/s8-borrado.png`, `docs/s8-borrado-storage.png` |
+| C4: pestaña Nube con URL firmadas | ✅ "6 foto(s) de leohv980@gmail.com en Supabase" con imágenes | `docs/s8-nube.png` |
+| C4: tiempo real | ✅ Al editar la nota en Table Editor, el iPhone mostró "desde supabase" sin recargar | `docs/s8-realtime.png` |
+| C5: segunda cuenta (`prueba.geocam@gmail.com`) | ✅ 0 fotos en Nube y en Fotos: no ve nada de la primera cuenta | `docs/s8-otra-cuenta.png` |
+| C7: GIF de demostración | ✅ Tomar foto → Sincronizar → aparece en Nube | `docs/s8-demo.gif` |
+
+**Observación:** la edición hecha en Supabase ("desde supabase") solo se ve en la pestaña Nube. La pestaña Fotos (SQLite) no cambia, porque la sincronización va en un solo sentido: del teléfono a la nube.
 
 ## 5. Seguridad (C6)
 
-- `.env` está en `.gitignore` y nunca se subió: `git log --all --full-history -- .env` no devuelve nada.
+- `.env` está en `.gitignore` y nunca se subió: `git log --all --full-history -- .env` no devuelve nada, y `git ls-files .env` tampoco.
 - En el repositorio solo está `.env.example`, sin valores reales.
-- En el código no hay `service_role`, `sb_secret_` ni la contraseña de la base de datos.
+- `git grep -i -E "sb_secret|service_role"` solo encuentra la línea del README que documenta esta auditoría: no hay claves secretas en el código.
 - Durante el trabajo la contraseña de la base se pegó por error en el chat con la IA. Se **restableció** en Supabase → Project Settings → Database → Reset database password. La app no la usa.
 
 ### Problemas de entorno
 - **Traductor de Brave:** al traducir el panel de Supabase al español la página fallaba (`removeChild`). Se resolvió dejando la página en inglés.
-- **Red lenta:** `npm` daba `ENOTFOUND` y Expo Go daba "request timed out". Se resolvió reintentando después de `npm ping` y con `npx expo start --tunnel`.
+- **Red lenta:** `npm` daba `ENOTFOUND` y Expo Go daba "request timed out". Se resolvió reintentando después de `npm ping` y con `npx expo start --tunnel`. Las pruebas en el teléfono se hicieron al final, con mejor señal.
+- **Estado "Unhealthy" en el panel de Supabase:** apareció en la página de inicio del proyecto (plan gratuito, instancia nano), pero la base, Storage y Realtime respondieron bien en todas las pruebas.

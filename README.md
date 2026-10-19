@@ -2,6 +2,8 @@
 
 > **Semana 8:** GeoCam ahora tiene **cuentas de usuario y respaldo en la nube con Supabase**. Las fotos se siguen guardando primero en el teléfono (SQLite) y se suben a PostgreSQL + Storage sin duplicados. Ver la sección [Semana 8](#semana-8--respaldo-en-la-nube-con-supabase).
 
+![demo](docs/s8-demo.gif)
+
 Cámara que etiqueta cada foto con coordenadas GPS, las muestra en un mapa y reacciona al movimiento del teléfono. Todo el hardware está encapsulado en **Custom Hooks tipados** (sin `any`), con permisos pedidos **en contexto** y **limpieza de todas las suscripciones**.
 
 **Integrantes:** Leonardo Hernández, Julián Ortiz
@@ -195,28 +197,28 @@ create policy "borrar de mi carpeta" on storage.objects
 | `drizzle/0002_sync_fields.sql` | `client_id` (índice único), `updated_at`, `remote_path`, `synced_at` (T4) |
 | `drizzle/0003_owner_id.sql` | `owner_id` (C5) |
 
-Las fotos anteriores reciben `client_id` y `owner_id` en `photosRepo.ensureSyncFields()` al iniciar sesión, así que **no se pierde ninguna**.
+Las fotos anteriores reciben `client_id` y `owner_id` en `photosRepo.ensureSyncFields()` al iniciar sesión, así que **no se pierde ninguna**: las 3 fotos de la Semana 7 aparecieron en la cuenta nueva y se subieron a la nube.
 
 ### Taller en clase (T1–T6)
 
 | Req. | Implementación |
 |---|---|
 | **T1** | Proyecto Supabase + `@supabase/supabase-js`, `expo-secure-store`, `expo-crypto`. `.env` con `EXPO_PUBLIC_SUPABASE_URL` y `EXPO_PUBLIC_SUPABASE_KEY` (publishable). `.env` en `.gitignore`, `.env.example` versionado. |
-| **T2** | `lib/supabase.ts` (sesión en SecureStore, `detectSessionInUrl: false`, auto-refresh con `AppState`), `context/AuthContext.tsx`, `app/login.tsx` y `Stack.Protected` en `app/_layout.tsx`. |
+| **T2** | `lib/supabase.ts` (sesión en SecureStore, `detectSessionInUrl: false`, auto-refresh con `AppState`), `context/AuthContext.tsx`, `app/login.tsx` y `Stack.Protected` en `app/_layout.tsx`. ✅ La sesión sobrevive al cierre de Expo Go. |
 | **T3** | `supabase/schema.sql`: tabla `photos` con RLS en las 4 operaciones y bucket **privado** `geocam` con una carpeta por usuario. |
 | **T4** | Migración `0002_sync_fields`: `clientId`, `updatedAt`, `remotePath`, `syncedAt`. `update()` siempre escribe `updatedAt`; `markSynced()` no lo toca. |
 | **T5** | Botón **☁️ Subir a la nube** en `foto/[id]`: `uploadPhoto()` sube el archivo como `ArrayBuffer` a `<user_id>/<client_id>.jpg` y crea la fila. |
-| **T6** | Ver capturas: la foto aparece en **Table Editor** y en **Storage** dentro de la carpeta del usuario. |
+| **T6** | ✅ La foto aparece en **Table Editor** y en **Storage** dentro de la carpeta del usuario (image/jpeg, 1.3 MB). |
 
 ### Trabajo para la casa (C1–C7)
 
 | Req. | Implementación | Archivos |
 |---|---|---|
-| **C1** Sincronizar | Botón en **Fotos** con el número de pendientes, avance "Subiendo 3 de 7…" y resumen "Subidas X de Y". Si una foto falla, las demás continúan. | `hooks/useSync.ts`, `services/cloudPhotos.ts` (`syncPending`) |
-| **C2** Sin duplicados ni huérfanos | Mismo `client_id` → misma ruta. Si la fila ya existe, solo se actualizan los metadatos (botón "Actualizar en la nube"). Si la fila falla después de subir el archivo, el archivo se borra. | `services/cloudPhotos.ts` (`uploadPhoto`) |
-| **C3** Borrado coherente | Primero se borran la fila remota y el archivo del bucket, después la foto local. Sin conexión: "No se borró nada". | `deleteRemotePhoto`, `hooks/usePhotos.ts`, `hooks/usePhoto.ts` |
-| **C4** Pestaña Nube | Lista de `public.photos` con URL firmadas (1 h) y canal Realtime filtrado por `user_id`, limpiado con `removeChannel`. | `app/(tabs)/nube.tsx`, `hooks/useCloudPhotos.ts` |
-| **C5** Fotos por usuario | RLS en PostgreSQL y Storage + `owner_id` en SQLite: cada consulta local filtra por el usuario de la sesión. | `drizzle/0003_owner_id.sql`, `hooks/useUserId.ts`, `db/repositories/photos.ts` |
+| **C1** Sincronizar | Botón en **Fotos** con el número de pendientes, avance "Subiendo 1 de 1…" y resumen "Subidas X de Y". Si una foto falla, las demás continúan. | `hooks/useSync.ts`, `services/cloudPhotos.ts` (`syncPending`) |
+| **C2** Sin duplicados ni huérfanos | Mismo `client_id` → misma ruta. Si la fila ya existe, solo se actualizan los metadatos (botón "Actualizar en la nube"). Si la fila falla después de subir el archivo, el archivo se borra. ✅ Al editar la nota y re-sincronizar siguieron 6 filas. | `services/cloudPhotos.ts` (`uploadPhoto`) |
+| **C3** Borrado coherente | Primero se borran la fila remota y el archivo del bucket, después la foto local. Sin conexión: "No se borró nada". ✅ De 6 a 5 filas y de 6 a 5 archivos. | `deleteRemotePhoto`, `hooks/usePhotos.ts`, `hooks/usePhoto.ts` |
+| **C4** Pestaña Nube | Lista de `public.photos` con URL firmadas (1 h) y canal Realtime filtrado por `user_id`, limpiado con `removeChannel`. ✅ Una nota editada en Supabase apareció sola en el iPhone. | `app/(tabs)/nube.tsx`, `hooks/useCloudPhotos.ts` |
+| **C5** Fotos por usuario | RLS en PostgreSQL y Storage + `owner_id` en SQLite: cada consulta local filtra por el usuario de la sesión. ✅ Una segunda cuenta ve 0 fotos. | `drizzle/0003_owner_id.sql`, `hooks/useUserId.ts`, `db/repositories/photos.ts` |
 | **C6** Auditoría de secretos | Ver la sección siguiente. | `.gitignore`, `.env.example` |
 | **C7** Documentación | Este README + `AI-LOG.md` + GIF. | — |
 
@@ -225,31 +227,53 @@ Las fotos anteriores reciben `client_id` y `owner_id` en `photosRepo.ensureSyncF
 | Comprobación | Resultado |
 |---|---|
 | `git log --all --full-history -- .env` | Sin resultados: `.env` nunca se subió |
+| `git ls-files .env` | Sin resultados: `.env` no está versionado |
 | `.env.example` en el repositorio | ✅ Solo con valores de ejemplo |
-| Búsqueda de `sb_secret_` y `service_role` en el código | Sin resultados |
+| Búsqueda de claves secretas con `git grep` | Solo aparece esta tabla del README |
 | Clave usada en la app | Solo la **publishable key**, que es pública y está protegida por RLS |
 | Contraseña de la base de datos | No se usa en la app; se restableció después de compartirla por error |
 
 ### Capturas (iPhone, Expo Go SDK 57)
 
-| T2: login | T5: subir a la nube | C1: sincronizar |
+| T2: login | T5: subir a la nube | C1: todo sincronizado |
 |---|---|---|
 | ![login](docs/s8-login.png) | ![subir](docs/s8-subir.png) | ![sincronizar](docs/s8-sincronizar.png) |
 
-| T6: tabla en Supabase | T6: Storage con la carpeta del usuario | C4: pestaña Nube |
+| C4: pestaña Nube | C4: tiempo real ("desde supabase") | C5: segunda cuenta sin fotos |
 |---|---|---|
-| ![tabla](docs/s8-tabla.png) | ![storage](docs/s8-storage.png) | ![nube](docs/s8-nube.png) |
+| ![nube](docs/s8-nube.png) | ![realtime](docs/s8-realtime.png) | ![otra cuenta](docs/s8-otra-cuenta.png) |
 
-| C5: segunda cuenta sin fotos de la primera | C3: borrado en ambos lados |
+**T6 + C2:** la fila en `public.photos` con la nota "Prueba C2" actualizada, sin duplicados (6 filas):
+
+![tabla](docs/s8-tabla.png)
+
+**T6:** el archivo en Storage dentro de la carpeta del usuario (`geocam/<user_id>/<client_id>.jpg`, 1.3 MB):
+
+![storage](docs/s8-storage.png)
+
+**C3:** después de eliminar una foto, quedan 5 filas y 5 archivos:
+
+| Tabla | Storage |
 |---|---|
-| ![otra cuenta](docs/s8-otra-cuenta.png) | ![borrado](docs/s8-borrado.png) |
+| ![borrado](docs/s8-borrado.png) | ![borrado storage](docs/s8-borrado-storage.png) |
 
-**GIF:** tomar foto → Sincronizar → aparece sola en la pestaña Nube.
+**GIF (C7):** tomar foto → Sincronizar ("Subidas: 1 de 1") → aparece en la pestaña Nube.
 
 ![demo](docs/s8-demo.gif)
 
+### Verificación final
+- [x] `npx tsc --noEmit` sin errores.
+- [x] Registro, login, sesión persistente y cierre de sesión.
+- [x] La foto aparece en la tabla y en Storage dentro de la carpeta del usuario, y no pesa 0 bytes.
+- [x] Sincronizar sube las pendientes con avance y resumen.
+- [x] Re-sincronizar no duplica filas ni archivos.
+- [x] Eliminar borra la fila y el archivo en la nube y en el teléfono.
+- [x] La pestaña Nube se actualiza en tiempo real.
+- [x] Una segunda cuenta no ve las fotos de la primera.
+- [x] `.env` nunca se subió al repositorio.
+
 ### Limitaciones
-- La sincronización es **en un solo sentido** (teléfono → nube). Las fotos de otro teléfono no se descargan a SQLite; solo se ven en la pestaña Nube.
+- La sincronización es **en un solo sentido** (teléfono → nube). Las fotos de otro teléfono no se descargan a SQLite, y una nota editada en Supabase solo se ve en la pestaña Nube.
 - Los álbumes siguen siendo locales y no se suben.
 - Las fotos antiguas sin dueño quedan asignadas al **primer** usuario que inicia sesión en el teléfono.
 
