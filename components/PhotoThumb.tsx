@@ -13,10 +13,19 @@ export function PhotoThumb({ photo, size = 'md' }: Props) {
 
   return (
     <View>
-      <Image
-        source={{ uri: photo.uri }}
-        className={`${box} rounded-lg border-2 ${isGallery ? 'border-sky-400' : 'border-emerald-400'}`}
-      />
+      {/* uri vacía: foto bajada de la nube cuya imagen aún no se descarga (Semana 9) */}
+      {photo.uri ? (
+        <Image
+          source={{ uri: photo.uri }}
+          className={`${box} rounded-lg border-2 ${isGallery ? 'border-sky-400' : 'border-emerald-400'}`}
+        />
+      ) : (
+        <View
+          className={`${box} items-center justify-center rounded-lg border-2 bg-neutral-800 ${isGallery ? 'border-sky-400' : 'border-emerald-400'}`}
+        >
+          <Text>⬇️</Text>
+        </View>
+      )}
       <View
         className={`absolute -bottom-1 -right-1 rounded-full px-1.5 ${isGallery ? 'bg-sky-400' : 'bg-emerald-400'}`}
       >

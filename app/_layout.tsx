@@ -1,14 +1,17 @@
 // app/_layout.tsx — primero las migraciones locales (Semana 7), después la autenticación (Semana 8)
+// Semana 9: todo queda dentro de PersistQueryClientProvider (TanStack Query con caché persistida, C3).
 import '../global.css';
 import { useEffect } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useMigrations } from 'drizzle-orm/expo-sqlite/migrator';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import migrations from '@/drizzle/migrations';
 import { db } from '@/db/client';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { photosRepo } from '@/db/repositories/photos';
+import { persistOptions, queryClient, useAppFocusManager } from '@/lib/queryClient';
 
 function RootNavigator() {
   const { session, isLoading } = useAuth();
@@ -28,6 +31,7 @@ function RootNavigator() {
       <Stack.Protected guard={!!session}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="foto/[id]" options={{ headerShown: true, title: 'Foto' }} />
+        <Stack.Screen name="sincronizacion" options={{ headerShown: true, title: 'Sincronización' }} />
       </Stack.Protected>
       <Stack.Protected guard={!session}>
         <Stack.Screen name="login" />
@@ -37,6 +41,7 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
+  useAppFocusManager(); // TanStack Query se entera de cuándo la app vuelve a primer plano
   // Aplica solo las migraciones pendientes y registra cuáles ya corrió
   const { success, error } = useMigrations(db, migrations);
 
@@ -58,9 +63,11 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthProvider>
-      <StatusBar style="light" />
-      <RootNavigator />
-    </AuthProvider>
+    <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
+      <AuthProvider>
+        <StatusBar style="light" />
+        <RootNavigator />
+      </AuthProvider>
+    </PersistQueryClientProvider>
   );
 }

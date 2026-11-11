@@ -1,25 +1,16 @@
-// app/foto/[id].tsx — ver, editar nota, favorita, mover de álbum, subir a la nube y eliminar
+// app/foto/[id].tsx — ver, editar nota, favorita, mover de álbum y eliminar
+// Semana 9: la subida es automática; aquí solo se muestra el estado de la foto.
 import { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, Image, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, Image, ScrollView, Alert } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { usePhoto } from '@/hooks/usePhoto';
 import { useAlbums } from '@/hooks/useAlbums';
+import { SyncBadge } from '@/components/SyncBadge';
 
 export default function FotoDetalleScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const photoId = Number(id);
-  const {
-    photo,
-    albumName,
-    isSynced,
-    isPending,
-    isUploading,
-    saveNote,
-    setFavorite,
-    moveToAlbum,
-    upload,
-    remove,
-  } = usePhoto(photoId);
+  const { photo, albumName, isSynced, isPending, saveNote, setFavorite, moveToAlbum, remove } = usePhoto(photoId);
   const { albums, createAlbum } = useAlbums();
 
   const [note, setNote] = useState('');
@@ -51,19 +42,12 @@ export default function FotoDetalleScreen() {
     if (!error) setNewAlbum('');
   };
 
-  // T5: subir esta foto a Supabase
-  const handleUpload = async () => {
-    const error = await upload();
-    if (error) Alert.alert('No se pudo subir', error);
-    else setMessage('Foto guardada en la nube ☁️');
-  };
-
-  // C3: si la foto está en la nube, se borra allá primero; sin conexión no se borra nada
+  // Semana 9 (C1): borrado lógico. Funciona sin conexión; la nube y los demás teléfonos se enteran al sincronizar.
   const confirmDelete = () =>
     Alert.alert(
       'Eliminar foto',
       isSynced
-        ? 'Se borrará del teléfono y de la nube (registro y archivo). ¿Continuar?'
+        ? 'Se borrará de este teléfono, de la nube y de tus otros teléfonos al sincronizar. ¿Continuar?'
         : 'Se borrará el registro y el archivo. ¿Continuar?',
       [
         { text: 'Cancelar', style: 'cancel' },
@@ -71,12 +55,8 @@ export default function FotoDetalleScreen() {
           text: 'Eliminar',
           style: 'destructive',
           onPress: async () => {
-            try {
-              await remove();
-              router.back();
-            } catch {
-              Alert.alert('Sin conexión', 'No se pudo borrar la foto de la nube. No se borró nada; inténtalo de nuevo.');
-            }
+            await remove();
+            router.back();
           },
         },
       ]
@@ -87,10 +67,10 @@ export default function FotoDetalleScreen() {
   const chipText = (active: boolean) => (active ? 'font-semibold text-neutral-950' : 'text-neutral-300');
 
   const cloudLabel = !isSynced
-    ? '☁️ Subir a la nube'
+    ? '⏳ Pendiente de subir a la nube'
     : isPending
-      ? '☁️ Actualizar en la nube'
-      : '✅ Guardada en la nube';
+      ? '⏳ Cambios pendientes de sincronizar'
+      : '✅ Sincronizada con la nube';
 
   return (
     <ScrollView className="flex-1 bg-neutral-950" contentContainerStyle={{ padding: 16, gap: 16 }}>
@@ -103,7 +83,13 @@ export default function FotoDetalleScreen() {
         }}
       />
 
-      <Image source={{ uri: photo.uri }} className="aspect-square w-full rounded-2xl bg-neutral-900" />
+      {photo.uri ? (
+        <Image source={{ uri: photo.uri }} className="aspect-square w-full rounded-2xl bg-neutral-900" />
+      ) : (
+        <View className="aspect-square w-full items-center justify-center rounded-2xl bg-neutral-900">
+          <Text className="text-neutral-500">Imagen pendiente de descargar de la nube</Text>
+        </View>
+      )}
 
       <View className="gap-1">
         <Text className="text-neutral-400">
@@ -116,20 +102,11 @@ export default function FotoDetalleScreen() {
         </Text>
       </View>
 
-      {/* T5: subir a la nube */}
-      <Pressable
-        onPress={handleUpload}
-        disabled={isUploading || (isSynced && !isPending)}
-        className={`flex-row items-center justify-center gap-2 rounded-xl p-3 ${isSynced && !isPending ? 'border border-emerald-500' : 'bg-sky-500'}`}
-      >
-        {isUploading ? (
-          <ActivityIndicator color="#0a0a0a" />
-        ) : (
-          <Text className={isSynced && !isPending ? 'font-semibold text-emerald-400' : 'font-semibold text-neutral-950'}>
-            {cloudLabel}
-          </Text>
-        )}
-      </Pressable>
+      {/* Semana 9: estado de esta foto + indicador general (lleva a la pantalla de sincronización) */}
+      <View className="gap-2">
+        <Text className={isPending ? 'font-semibold text-amber-300' : 'font-semibold text-emerald-400'}>{cloudLabel}</Text>
+        <SyncBadge />
+      </View>
 
       {/* Favorita */}
       <Pressable

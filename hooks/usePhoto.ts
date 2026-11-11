@@ -1,9 +1,9 @@
-// hooks/usePhoto.ts — una foto (reactiva), sus acciones de edición y la subida a la nube
-import { useCallback, useState } from 'react';
+// hooks/usePhoto.ts — una foto (reactiva) y sus acciones de edición
+// Semana 9: ya no hay subida manual; cada cambio pide una sincronización.
+import { useCallback } from 'react';
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { photosRepo } from '@/db/repositories/photos';
-import { deletePhotoFile } from '@/services/photoFiles';
-import { deleteRemotePhoto, uploadPhoto } from '@/services/cloudPhotos';
+import { isPending as photoIsPending, requestSync } from '@/hooks/useSync';
 import { useUserId } from '@/hooks/useUserId';
 
 export function usePhoto(id: number) {
@@ -12,64 +12,45 @@ export function usePhoto(id: number) {
   const { data, error } = useLiveQuery(photosRepo.findByIdQuery(id, userId), [id, userId]);
   const row = data[0];
   const photo = row?.photo ?? null;
-  const [isUploading, setIsUploading] = useState(false);
 
   // Las consultas de Drizzle son "perezosas": solo se ejecutan al hacer await (o .run()).
   const saveNote = useCallback(
     async (note: string) => {
       await photosRepo.update(id, { note: note.trim() || null });
+      requestSync();
     },
     [id]
   );
   const setFavorite = useCallback(
     async (favorite: boolean) => {
       await photosRepo.update(id, { favorite });
+      requestSync();
     },
     [id]
   );
   const moveToAlbum = useCallback(
     async (albumId: number | null) => {
       await photosRepo.update(id, { albumId });
+      requestSync();
     },
     [id]
   );
 
-  /** T5: sube esta foto a Supabase. Devuelve el mensaje de error, o null si salió bien. */
-  const upload = useCallback(async (): Promise<string | null> => {
-    if (!photo) return 'La foto no existe';
-    setIsUploading(true);
-    try {
-      await uploadPhoto(photo, userId);
-      return null;
-    } catch (e) {
-      return e instanceof Error ? e.message : 'No se pudo subir la foto';
-    } finally {
-      setIsUploading(false);
-    }
-  }, [photo, userId]);
-
-  /** C3: borra de la nube y después del teléfono. Si la nube falla, lanza el error y no borra nada. */
+  /** C1: borrado lógico; funciona sin conexión. */
   const remove = useCallback(async () => {
-    if (!photo) return;
-    await deleteRemotePhoto(photo);
-    await photosRepo.remove(id);
-    deletePhotoFile(photo.uri);
-  }, [id, photo]);
-
-  const isSynced = !!photo?.syncedAt;
-  const isPending = !!photo && (!photo.syncedAt || (!!photo.updatedAt && photo.syncedAt < photo.updatedAt));
+    await photosRepo.markDeleted(id);
+    requestSync();
+  }, [id]);
 
   return {
     photo,
     albumName: row?.albumName ?? null,
     error,
-    isSynced,
-    isPending,
-    isUploading,
+    isSynced: !!photo?.remotePath,
+    isPending: !!photo && photoIsPending(photo),
     saveNote,
     setFavorite,
     moveToAlbum,
-    upload,
     remove,
   };
 }

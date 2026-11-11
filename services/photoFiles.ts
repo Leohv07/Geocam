@@ -17,7 +17,22 @@ export async function persistPhoto(cacheUri: string): Promise<string> {
 
 /** Borra el archivo solo si está dentro de documents/photos (nunca toca la galería del usuario). */
 export function deletePhotoFile(uri: string): void {
-  if (!uri.startsWith(photosDir.uri)) return;
+  if (!uri || !uri.startsWith(photosDir.uri)) return;
   const file = new File(uri);
   if (file.exists) file.delete();
+}
+
+/**
+ * Semana 9: descarga a documents/photos el archivo de una foto que vino de la nube,
+ * para que se vea sin conexión. El nombre es el clientId: repetir la descarga no duplica archivos.
+ */
+export async function downloadPhotoFile(url: string, clientId: string): Promise<string> {
+  if (!photosDir.exists) photosDir.create({ intermediates: true, idempotent: true });
+  const destination = new File(photosDir, `${clientId}.jpg`);
+  if (destination.exists) {
+    if (destination.size > 0) return destination.uri;
+    destination.delete(); // restos de un intento anterior que se cortó
+  }
+  const file = await File.downloadFileAsync(url, destination);
+  return file.uri;
 }

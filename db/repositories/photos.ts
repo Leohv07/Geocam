@@ -1,12 +1,24 @@
 // db/repositories/photos.ts — única capa que conoce Drizzle
 // Semana 8: todas las consultas se filtran por ownerId (C5) y las ediciones escriben updatedAt (T4).
-import { and, desc, eq, isNotNull, isNull, like, lt, or, type SQL } from 'drizzle-orm';
+// Semana 9: las fotos borradas (deletedAt) no se muestran, pero siguen pendientes hasta subir la marca (C1).
+import { and, asc, desc, eq, isNotNull, isNull, like, lt, or, type SQL } from 'drizzle-orm';
 import * as Crypto from 'expo-crypto';
 import { db } from '@/db/client';
 import { albums, photos, type NewPhoto } from '@/db/schema';
 
-export type PhotoInput = Omit<NewPhoto, 'id' | 'clientId' | 'updatedAt' | 'remotePath' | 'syncedAt' | 'ownerId'>;
+export type PhotoInput = Omit<
+  NewPhoto,
+  'id' | 'clientId' | 'updatedAt' | 'remotePath' | 'syncedAt' | 'ownerId' | 'deletedAt'
+>;
 export type PhotoChanges = Partial<Pick<NewPhoto, 'note' | 'favorite' | 'albumId'>>;
+
+/** Cambios que llegan de la nube. Nunca usan la hora actual: llevan la versión remota. */
+export interface RemoteChanges {
+  note: string | null;
+  favorite: boolean;
+  updatedAt: Date;
+  syncedAt: Date;
+}
 
 export interface PhotoFilters {
   search: string;
@@ -14,13 +26,19 @@ export interface PhotoFilters {
   onlyFavorites: boolean;
 }
 
-/** Pendiente de subir: nunca se sincronizó o se editó después de la última sincronización. */
+/** Pendiente de subir: nunca se sincronizó o se editó (o borró) después de la última sincronización. */
 const isPending = or(isNull(photos.syncedAt), lt(photos.syncedAt, photos.updatedAt));
+/** C1: la UI nunca muestra las fotos marcadas como borradas. */
+const isVisible = isNull(photos.deletedAt);
 
 export const photosRepo = {
   /** Todas las fotos del usuario, la más reciente primero. Devuelve la consulta sin ejecutar (para useLiveQuery). */
   listQuery(ownerId: string) {
-    return db.select().from(photos).where(eq(photos.ownerId, ownerId)).orderBy(desc(photos.createdAt));
+    return db
+      .select()
+      .from(photos)
+      .where(and(eq(photos.ownerId, ownerId), isVisible))
+      .orderBy(desc(photos.createdAt));
   },
 
   /** Solo fotos con ubicación (latitud no nula). */
@@ -28,22 +46,22 @@ export const photosRepo = {
     return db
       .select()
       .from(photos)
-      .where(and(eq(photos.ownerId, ownerId), isNotNull(photos.latitude)))
+      .where(and(eq(photos.ownerId, ownerId), isVisible, isNotNull(photos.latitude)))
       .orderBy(desc(photos.createdAt));
   },
 
-  /** C1 (Semana 8): fotos pendientes de subir a la nube. */
+  /** Fotos pendientes de subir, incluidas las marcas de borrado que aún no llegan a la nube. */
   pendingQuery(ownerId: string) {
     return db
       .select()
       .from(photos)
       .where(and(eq(photos.ownerId, ownerId), isPending))
-      .orderBy(desc(photos.createdAt));
+      .orderBy(asc(photos.createdAt));
   },
 
   /** Búsqueda por nota (LIKE) + filtros por álbum y favoritas, con el nombre del álbum (LEFT JOIN). */
   filteredQuery(ownerId: string, { search, albumId, onlyFavorites }: PhotoFilters) {
-    const conditions: SQL[] = [eq(photos.ownerId, ownerId)];
+    const conditions: SQL[] = [eq(photos.ownerId, ownerId), isVisible];
     const term = search.trim();
     if (term) conditions.push(like(photos.note, `%${term}%`));
     if (albumId !== null) conditions.push(eq(photos.albumId, albumId));
@@ -73,7 +91,7 @@ export const photosRepo = {
       .select({ photo: photos, albumName: albums.name })
       .from(photos)
       .leftJoin(albums, eq(photos.albumId, albums.id))
-      .where(and(eq(photos.id, id), eq(photos.ownerId, ownerId)));
+      .where(and(eq(photos.id, id), eq(photos.ownerId, ownerId), isVisible));
   },
 
   findById(id: number) {
@@ -81,11 +99,37 @@ export const photosRepo = {
   },
 
   listAll(ownerId: string) {
-    return db.select().from(photos).where(eq(photos.ownerId, ownerId)).all();
+    return db
+      .select()
+      .from(photos)
+      .where(and(eq(photos.ownerId, ownerId), isVisible))
+      .all();
   },
 
   listPending(ownerId: string) {
-    return db.select().from(photos).where(and(eq(photos.ownerId, ownerId), isPending)).all();
+    return db
+      .select()
+      .from(photos)
+      .where(and(eq(photos.ownerId, ownerId), isPending))
+      .orderBy(asc(photos.createdAt))
+      .all();
+  },
+
+  /** Fotos bajadas de la nube cuyo archivo aún no se pudo descargar (uri vacía). */
+  listMissingFiles(ownerId: string) {
+    return db
+      .select()
+      .from(photos)
+      .where(and(eq(photos.ownerId, ownerId), isVisible, eq(photos.uri, ''), isNotNull(photos.remotePath)))
+      .all();
+  },
+
+  findByClientId(ownerId: string, clientId: string) {
+    return db
+      .select()
+      .from(photos)
+      .where(and(eq(photos.ownerId, ownerId), eq(photos.clientId, clientId)))
+      .get();
   },
 
   create(ownerId: string, data: PhotoInput) {
@@ -101,11 +145,50 @@ export const photosRepo = {
       .where(eq(photos.id, id));
   },
 
-  /** Marca la foto como subida. NO toca updatedAt, o volvería a quedar pendiente. */
-  markSynced(id: number, remotePath: string) {
-    return db.update(photos).set({ remotePath, syncedAt: new Date() }).where(eq(photos.id, id));
+  /** C1: borrar es marcar. updatedAt = ahora, así la marca queda pendiente y gana a ediciones anteriores. */
+  markDeleted(id: number) {
+    const now = new Date();
+    return db.update(photos).set({ deletedAt: now, updatedAt: now }).where(eq(photos.id, id));
   },
 
+  /** T3: foto creada en otro teléfono. Nace sincronizada y con el dueño de la sesión (C5 de la Semana 8). */
+  insertFromRemote(ownerId: string, data: Omit<NewPhoto, 'id' | 'ownerId'>) {
+    return db.insert(photos).values({ ...data, ownerId });
+  },
+
+  /**
+   * T3: aplica en local una versión más nueva (y no borrada) de la nube.
+   * deletedAt vuelve a null: si aquí estaba borrada, la edición remota es posterior y gana.
+   */
+  applyRemote(id: number, changes: RemoteChanges) {
+    return db
+      .update(photos)
+      .set({ ...changes, deletedAt: null })
+      .where(eq(photos.id, id));
+  },
+
+  /** Guarda la ruta local del archivo descargado (no cambia updatedAt: no es una edición del usuario). */
+  setUri(id: number, uri: string) {
+    return db.update(photos).set({ uri }).where(eq(photos.id, id));
+  },
+
+  /**
+   * Marca la foto como subida. syncedAt es la versión (updatedAt) que se subió, NO "ahora":
+   * si el usuario la editó mientras subía, su updatedAt es posterior y sigue pendiente.
+   */
+  markSynced(id: number, remotePath: string, syncedAt: Date) {
+    return db.update(photos).set({ remotePath, syncedAt }).where(eq(photos.id, id));
+  },
+
+  /**
+   * C1: la versión local ganó a un borrado remoto, pero el archivo del bucket ya se borró.
+   * Sin remotePath, push vuelve a subir el archivo.
+   */
+  clearRemotePath(id: number) {
+    return db.update(photos).set({ remotePath: null }).where(eq(photos.id, id));
+  },
+
+  /** Elimina la fila de verdad. Solo después de que la marca de borrado está sincronizada. */
   remove(id: number) {
     return db.delete(photos).where(eq(photos.id, id));
   },

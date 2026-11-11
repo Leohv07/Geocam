@@ -1,4 +1,4 @@
-// app/(tabs)/fotos.tsx — lista con búsqueda y filtros (Semana 7) + sincronizar con la nube (Semana 8, C1)
+// app/(tabs)/fotos.tsx — lista con búsqueda y filtros (Semana 7) + sincronización automática (Semana 9)
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, FlatList, Image, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
@@ -6,7 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePhotoSearch } from '@/hooks/usePhotoSearch';
 import { useAlbums } from '@/hooks/useAlbums';
 import { useAuth } from '@/context/AuthContext';
-import { useSync } from '@/hooks/useSync';
+import { isPending, useSync } from '@/hooks/useSync';
+import { SyncBadge } from '@/components/SyncBadge';
 
 export default function FotosScreen() {
   const insets = useSafeAreaInsets();
@@ -17,18 +18,8 @@ export default function FotosScreen() {
   const { results } = usePhotoSearch({ search, albumId, onlyFavorites });
   const { albums, removeAlbum } = useAlbums();
   const { session, signOut } = useAuth();
-  const { pendingCount, isSyncing, progress, sync } = useSync();
-
-  // C1: sube una por una las pendientes; si una falla, las demás continúan
-  const handleSync = async () => {
-    const r = await sync();
-    if (r.total === 0) return Alert.alert('Todo al día', 'No hay fotos pendientes de subir.');
-    Alert.alert(
-      r.failed === 0 ? 'Sincronización completa' : 'Sincronización con errores',
-      `Subidas: ${r.uploaded} de ${r.total}.` +
-        (r.failed > 0 ? `\nQuedaron pendientes: ${r.failed}.\n\n${r.errors[0]}` : '')
-    );
-  };
+  const { isOnline, pendingCount, isSyncing, syncNow } = useSync();
+  const canSync = isOnline && !isSyncing;
 
   // T2: al cerrar sesión, Stack.Protected lleva al login sin navegar a mano
   const confirmSignOut = () =>
@@ -69,21 +60,21 @@ export default function FotosScreen() {
             <Text className="text-sm text-red-400">Cerrar sesión</Text>
           </Pressable>
         </View>
-        {/* C1: botón Sincronizar con avance "3 de 7" */}
-        <Pressable
-          onPress={handleSync}
-          disabled={isSyncing}
-          className={`flex-row items-center justify-center gap-2 rounded-xl p-3 ${pendingCount > 0 ? 'bg-sky-500' : 'border border-neutral-700'}`}
-        >
-          {isSyncing && <ActivityIndicator color="#0a0a0a" />}
-          <Text className={pendingCount > 0 ? 'font-semibold text-neutral-950' : 'text-neutral-400'}>
-            {isSyncing
-              ? `Subiendo ${progress?.done ?? 0} de ${progress?.total ?? 0}…`
-              : pendingCount > 0
-                ? `☁️ Sincronizar (${pendingCount} pendiente${pendingCount === 1 ? '' : 's'})`
-                : '✅ Todo sincronizado'}
-          </Text>
-        </Pressable>
+        {/* Semana 9: indicador (lleva a la pantalla de estado) + botón para no esperar al disparo automático */}
+        <View className="flex-row items-center justify-between gap-2">
+          <SyncBadge />
+          <Pressable
+            onPress={() => void syncNow()}
+            disabled={!canSync}
+            className={`flex-row items-center gap-2 rounded-full px-3 py-1.5 ${canSync ? 'bg-sky-500' : 'border border-neutral-700'}`}
+            accessibilityRole="button"
+          >
+            {isSyncing && <ActivityIndicator size="small" color="#a3a3a3" />}
+            <Text className={canSync ? 'text-xs font-semibold text-neutral-950' : 'text-xs text-neutral-500'}>
+              🔄 Sincronizar ahora{pendingCount > 0 && canSync ? ` (${pendingCount})` : ''}
+            </Text>
+          </Pressable>
+        </View>
         <TextInput
           value={search}
           onChangeText={setSearch}
@@ -126,7 +117,14 @@ export default function FotosScreen() {
             onPress={() => router.push({ pathname: '/foto/[id]', params: { id: String(item.id) } })}
             className="flex-row items-center gap-3 rounded-2xl bg-neutral-900 p-2 active:opacity-80"
           >
-            <Image source={{ uri: item.uri }} className="h-16 w-16 rounded-xl bg-neutral-800" />
+            {/* uri vacía: foto bajada de la nube cuya imagen aún no se descarga */}
+            {item.uri ? (
+              <Image source={{ uri: item.uri }} className="h-16 w-16 rounded-xl bg-neutral-800" />
+            ) : (
+              <View className="h-16 w-16 items-center justify-center rounded-xl bg-neutral-800">
+                <Text className="text-lg">⬇️</Text>
+              </View>
+            )}
             <View className="flex-1 gap-0.5">
               <Text className="text-white" numberOfLines={1}>
                 {item.note || 'Sin nota'}
@@ -136,10 +134,8 @@ export default function FotosScreen() {
               </Text>
             </View>
             {item.favorite && <Text className="text-lg text-amber-400">★</Text>}
-            {/* Ícono de nube: subida y sin cambios pendientes */}
-            <Text className="pr-2 text-lg">
-              {item.syncedAt && (!item.updatedAt || item.syncedAt >= item.updatedAt) ? '☁️' : ' '}
-            </Text>
+            {/* Nube = sincronizada; reloj = pendiente de subir */}
+            <Text className="pr-2 text-lg">{isPending(item) ? '⏳' : '☁️'}</Text>
           </Pressable>
         )}
       />

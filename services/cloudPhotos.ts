@@ -1,10 +1,8 @@
-// services/cloudPhotos.ts — única capa que conoce Supabase para las fotos
-import { File } from 'expo-file-system';
+// services/cloudPhotos.ts — única capa que conoce Supabase para las fotos (lectura y archivos)
+// La subida y la bajada viven en services/sync.ts.
 import { supabase } from '@/lib/supabase';
-import { photosRepo } from '@/db/repositories/photos';
-import type { Photo } from '@/db/schema';
 
-const BUCKET = 'geocam';
+export const BUCKET = 'geocam';
 
 /** Fila de la tabla public.photos en Supabase. */
 export interface CloudPhoto {
@@ -18,95 +16,50 @@ export interface CloudPhoto {
   favorite: boolean;
   source: 'camera' | 'gallery';
   taken_at: string;
-  updated_at: string;
+  updated_at: string; // reloj del teléfono: decide conflictos
+  server_updated_at: string; // reloj del servidor: cursor de bajada (Semana 9)
+  deleted_at: string | null; // borrado lógico (Semana 9, C1)
   created_at: string;
 }
 
-/** Metadatos que se suben (user_id lo pone la base con default auth.uid()). */
-function toRow(photo: Photo, path: string) {
+export type CloudPhotoWithUrl = CloudPhoto & { url: string | null };
+
+const PAGE_SIZE = 10;
+
+export interface CloudPhotosPage {
+  items: CloudPhotoWithUrl[];
+  nextCursor: string | null;
+}
+
+/**
+ * C2: una página de la pestaña Nube, con paginación por cursor ("las 10 anteriores a la última
+ * que ya tengo") y búsqueda por nota. RLS solo devuelve las filas del usuario de la sesión.
+ */
+export async function listCloudPhotosPage(params: { cursor: string | null; search: string }): Promise<CloudPhotosPage> {
+  let query = supabase
+    .from('photos')
+    .select('*')
+    .is('deleted_at', null)
+    .order('taken_at', { ascending: false })
+    .limit(PAGE_SIZE);
+
+  if (params.cursor) query = query.lt('taken_at', params.cursor);
+
+  const term = params.search.trim();
+  if (term) query = query.ilike('note', `%${term}%`);
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const rows = data as CloudPhoto[];
+  const urls = await signedUrls(rows.map((r) => r.storage_path));
   return {
-    client_id: photo.clientId!,
-    storage_path: path,
-    latitude: photo.latitude,
-    longitude: photo.longitude,
-    note: photo.note,
-    favorite: photo.favorite,
-    source: photo.source,
-    taken_at: photo.createdAt.toISOString(),
-    updated_at: (photo.updatedAt ?? photo.createdAt).toISOString(),
+    items: rows.map((r) => ({ ...r, url: urls[r.storage_path] ?? null })),
+    nextCursor: rows.length === PAGE_SIZE ? rows[rows.length - 1].taken_at : null,
   };
 }
 
-/**
- * T5 + C2: sube una foto sin crear duplicados ni archivos huérfanos.
- * - La ruta es <userId>/<clientId>.jpg: la misma foto siempre va a la misma ruta.
- * - Si la fila remota ya existe (foto ya subida y luego editada), solo se actualizan los metadatos.
- * - Si el archivo sube pero la fila falla, el archivo se borra del bucket antes de reportar el error.
- */
-export async function uploadPhoto(photo: Photo, userId: string): Promise<void> {
-  if (!photo.clientId) throw new Error('La foto no tiene clientId: ejecuta ensureSyncFields()');
-  const path = `${userId}/${photo.clientId}.jpg`;
-
-  // ¿Ya existe en la nube? (client_id es único)
-  const { data: existing, error: findError } = await supabase
-    .from('photos')
-    .select('id')
-    .eq('client_id', photo.clientId)
-    .maybeSingle();
-  if (findError) throw findError;
-
-  if (existing) {
-    // Re-sincronización: el archivo no cambia, solo la nota, la favorita, etc.
-    const { error } = await supabase.from('photos').update(toRow(photo, path)).eq('client_id', photo.clientId);
-    if (error) throw error;
-    await photosRepo.markSynced(photo.id, path);
-    return;
-  }
-
-  // 1. Archivo local -> ArrayBuffer (un Blob o FormData sube archivos de 0 bytes en React Native)
-  const file = new File(photo.uri);
-  if (!file.exists) throw new Error('El archivo de la foto ya no existe en el teléfono');
-  const arrayBuffer = await fetch(photo.uri).then((res) => res.arrayBuffer());
-  if (arrayBuffer.byteLength === 0) throw new Error('El archivo pesa 0 bytes');
-
-  // 2. Subir a la carpeta del usuario. upsert: true reemplaza un archivo huérfano de un intento anterior.
-  const { error: uploadError } = await supabase.storage
-    .from(BUCKET)
-    .upload(path, arrayBuffer, { contentType: 'image/jpeg', upsert: true });
-  if (uploadError) throw uploadError;
-
-  // 3. Fila remota con los metadatos
-  const { error: insertError } = await supabase.from('photos').insert(toRow(photo, path));
-  if (insertError) {
-    // C2: no dejar archivos huérfanos en el bucket
-    await supabase.storage.from(BUCKET).remove([path]);
-    throw insertError;
-  }
-
-  // 4. Marcar la foto local como sincronizada (sin tocar updatedAt)
-  await photosRepo.markSynced(photo.id, path);
-}
-
-/**
- * C3: borra la fila remota y su archivo. Si algo falla (por ejemplo, sin conexión) lanza el error
- * y quien llama NO debe borrar la foto local. Repetirlo es seguro: si la fila ya no existe, no pasa nada.
- */
-export async function deleteRemotePhoto(photo: Photo): Promise<void> {
-  if (!photo.remotePath || !photo.clientId) return;
-  const { error: rowError } = await supabase.from('photos').delete().eq('client_id', photo.clientId);
-  if (rowError) throw rowError;
-  const { error: fileError } = await supabase.storage.from(BUCKET).remove([photo.remotePath]);
-  if (fileError) throw fileError;
-}
-
-/** C4: fotos del usuario guardadas en Supabase (RLS solo devuelve las propias). */
-export async function listCloudPhotos(): Promise<CloudPhoto[]> {
-  const { data, error } = await supabase.from('photos').select('*').order('taken_at', { ascending: false });
-  if (error) throw error;
-  return data as CloudPhoto[];
-}
-
-/** URL temporal (1 hora) para ver un archivo de un bucket privado. */
+/** URL temporal (1 hora) para ver o descargar un archivo de un bucket privado. */
 export async function signedUrl(path: string): Promise<string> {
   const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
   if (error) throw error;
@@ -123,29 +76,13 @@ export async function signedUrls(paths: string[]): Promise<Record<string, string
   return map;
 }
 
-export interface SyncResult {
-  total: number;
-  uploaded: number;
-  failed: number;
-  errors: string[];
-}
-
-/** C1: sube una por una las fotos pendientes. Si una falla, las demás continúan. */
-export async function syncPending(
-  userId: string,
-  onProgress?: (done: number, total: number) => void
-): Promise<SyncResult> {
-  const pending = await photosRepo.listPending(userId);
-  const result: SyncResult = { total: pending.length, uploaded: 0, failed: 0, errors: [] };
-  for (let i = 0; i < pending.length; i++) {
-    onProgress?.(i + 1, pending.length);
-    try {
-      await uploadPhoto(pending[i], userId);
-      result.uploaded++;
-    } catch (e) {
-      result.failed++;
-      result.errors.push(e instanceof Error ? e.message : String(e));
-    }
-  }
-  return result;
+/** Suscripción de tiempo real a las filas del usuario. Devuelve la función que la cancela. */
+export function subscribeToCloudPhotos(userId: string, onChange: () => void): () => void {
+  const channel = supabase
+    .channel(`nube-${userId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'photos', filter: `user_id=eq.${userId}` }, onChange)
+    .subscribe();
+  return () => {
+    void supabase.removeChannel(channel);
+  };
 }

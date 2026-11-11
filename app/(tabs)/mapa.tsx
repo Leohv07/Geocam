@@ -62,14 +62,8 @@ export default function MapaScreen() {
       {
         text: 'Eliminar',
         style: 'destructive',
-        // Semana 8 (C3): si la nube no responde, no se borra nada
-        onPress: async () => {
-          try {
-            await removePhoto(photo.id);
-          } catch {
-            Alert.alert('Sin conexión', 'No se pudo borrar la foto de la nube. No se borró nada; inténtalo de nuevo.');
-          }
-        },
+        // Semana 9 (C1): borrado lógico; funciona sin conexión y se sincroniza después
+        onPress: () => void removePhoto(photo.id),
       },
     ]);
 
@@ -113,7 +107,13 @@ export default function MapaScreen() {
       {/* Miniatura de la foto seleccionada */}
       {selected && selected.latitude !== null && selected.longitude !== null && (
         <View className="absolute left-4 right-4 flex-row items-center gap-3 rounded-2xl bg-neutral-900 p-3" style={{ bottom: withoutCoords.length > 0 ? 150 : 16 }}>
-          <Image source={{ uri: selected.uri }} className="h-24 w-24 rounded-xl" />
+          {selected.uri ? (
+            <Image source={{ uri: selected.uri }} className="h-24 w-24 rounded-xl" />
+          ) : (
+            <View className="h-24 w-24 items-center justify-center rounded-xl bg-neutral-800">
+              <Text>⬇️</Text>
+            </View>
+          )}
           <View className="flex-1 gap-1">
             <Text className={`text-xs font-bold ${selected.source === 'gallery' ? 'text-sky-400' : 'text-emerald-400'}`}>
               {selected.source === 'gallery' ? 'GALERÍA' : 'CÁMARA'}

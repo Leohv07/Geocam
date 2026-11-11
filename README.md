@@ -1,6 +1,8 @@
-# GeoCam 📸🌎 — Semanas 6, 7 y 8: Sensores + SQLite offline-first + Supabase
+# GeoCam 📸🌎 — Semanas 6 a 9: Sensores + SQLite offline-first + Supabase + sincronización
 
-> **Semana 8:** GeoCam ahora tiene **cuentas de usuario y respaldo en la nube con Supabase**. Las fotos se siguen guardando primero en el teléfono (SQLite) y se suben a PostgreSQL + Storage sin duplicados. Ver la sección [Semana 8](#semana-8--respaldo-en-la-nube-con-supabase).
+> **Semana 9:** GeoCam ahora se **sincroniza sola en los dos sentidos** entre SQLite y Supabase con **TanStack Query**: funciona en modo avión, sube lo pendiente al volver la red, baja lo creado en otros teléfonos y resuelve conflictos con "gana el último cambio". Ver la sección [Semana 9](#semana-9--tanstack-query-y-sincronización-offline-first).
+>
+> **Semana 8:** cuentas de usuario y respaldo en la nube con Supabase. Ver la sección [Semana 8](#semana-8--respaldo-en-la-nube-con-supabase).
 
 ![demo](docs/s8-demo.gif)
 
@@ -22,6 +24,7 @@ Cámara que etiqueta cada foto con coordenadas GPS, las muestra en un mapa y rea
 | Módulos nativos | `expo-camera`, `expo-location`, `expo-image-picker`, `expo-sensors`, `react-native-maps` |
 | Base local (Semana 7) | `expo-sqlite` + `drizzle-orm` 0.45, migraciones con `drizzle-kit` 0.31, `expo-file-system` |
 | Nube (Semana 8) | `@supabase/supabase-js` 2.x (Auth, PostgreSQL, Storage, Realtime), `expo-secure-store`, `expo-crypto` |
+| Sincronización (Semana 9) | `@tanstack/react-query` 5.107, `@tanstack/react-query-persist-client` + `@tanstack/query-async-storage-persister`, `expo-network` |
 
 > Todos los módulos se instalaron con `npx expo install`, no con `npm install`, para usar la versión compatible con el SDK.
 
@@ -34,7 +37,7 @@ npx expo start -c        # misma red Wi-Fi que el teléfono
 npx expo start --tunnel  # si la red bloquea la conexión
 ```
 
-1. En Supabase → **SQL Editor**, ejecuta completo [`supabase/schema.sql`](./supabase/schema.sql).
+1. En Supabase → **SQL Editor**, ejecuta completo [`supabase/schema.sql`](./supabase/schema.sql) y después [`supabase/semana9.sql`](./supabase/semana9.sql).
 2. En **Authentication → Sign In / Providers → Email**, desactiva **Confirm email** para poder probar sin correo.
 3. Escanea el QR con **Expo Go** en un **teléfono físico**: la cámara no funciona en el simulador de iOS.
 
@@ -44,19 +47,21 @@ npx expo start --tunnel  # si la red bloquea la conexión
 
 ```
 app/
-  _layout.tsx            useMigrations → AuthProvider → Stack.Protected (Semanas 7 y 8)
+  _layout.tsx            useMigrations → PersistQueryClientProvider → AuthProvider → Stack.Protected
   index.tsx              Redirige a /geocam o /login según la sesión
   login.tsx              Iniciar sesión / crear cuenta (Semana 8)
+  sincronizacion.tsx     Estado de la sincronización + "Sincronizar ahora" (Semana 9, C4)
   (tabs)/
-    _layout.tsx          Tabs GeoCam + Fotos + Nube + Mapa
+    _layout.tsx          Tabs GeoCam + Fotos + Nube + Mapa; mantiene activa la sincronización (S9)
     geocam.tsx           Cámara, galería (R2), agitar (R4), nivel, ubicación aproximada
-    fotos.tsx            Lista con búsqueda y filtros + botón Sincronizar (C1) + cerrar sesión
-    nube.tsx             Fotos guardadas en Supabase, en tiempo real (C4)
+    fotos.tsx            Lista con búsqueda y filtros + indicador y "Sincronizar ahora" (S9) + cerrar sesión
+    nube.tsx             Feed de la nube con useInfiniteQuery, búsqueda y 4 estados de UI (S9, C2)
     mapa.tsx             Mapa con markers + lista "Sin ubicación" (R3)
-  foto/[id].tsx          Detalle: nota, favorita, álbum, subir a la nube (T5), eliminar (C3)
+  foto/[id].tsx          Detalle: nota, favorita, álbum, estado de sincronización, eliminar (borrado lógico)
 components/
   PermissionPrimer.tsx   Pantalla previa de explicación / "Abrir Ajustes"
   PhotoThumb.tsx         Miniatura con insignia CAM (verde) / GAL (azul)
+  SyncBadge.tsx          Indicador: sin conexión / N pendientes / sincronizando / al día (S9, T6)
 context/
   AuthContext.tsx        Sesión de Supabase: session, signIn, signUp, signOut (Semana 8)
 hooks/
@@ -65,30 +70,167 @@ hooks/
   useShake.ts            Acelerómetro: umbral de magnitud + cooldown (R4)
   useLevel.ts            Indicador de nivel (reto opcional)
   useUserId.ts           id del usuario de la sesión (C5)
-  usePhotos.ts           useLiveQuery + addPhoto / removePhoto / clearAll
-  usePhoto.ts            Una foto + editar + subir a la nube (T5) + borrar (C3)
+  usePhotos.ts           useLiveQuery + addPhoto / removePhoto / clearAll (+ requestSync)
+  usePhoto.ts            Una foto + editar + borrar (borrado lógico, S9)
   useAlbums.ts           Listar, crear y borrar álbumes
   usePhotoSearch.ts      Búsqueda y filtros reactivos
-  useSync.ts             Pendientes + Sincronizar con avance (C1)
-  useCloudPhotos.ts      Fotos remotas + URL firmadas + Realtime (C4)
+  useSync.ts             Sincronización como useQuery + requestSync() + pendientes (S9, T6)
+  useCloudPhotos.ts      Feed de la nube con useInfiniteQuery + Realtime que invalida la caché (S9, C2)
+  useDebouncedValue.ts   Búsqueda en vivo con espera al escribir (S9)
 db/
-  schema.ts              Tablas albums y photos (con campos de sincronización)
+  schema.ts              Tablas albums, photos (con deletedAt) y sync_meta
   client.ts              openDatabaseSync + enableChangeListener + PRAGMA foreign_keys
   repositories/photos.ts Consultas y CRUD de fotos filtradas por dueño (única capa con Drizzle)
   repositories/albums.ts CRUD de álbumes (SET NULL en transacción)
-drizzle/                 Migraciones 0000–0003 generadas con drizzle-kit (versionadas)
+  repositories/syncMeta.ts Cursor de bajada, último resultado y último error (S9)
+drizzle/                 Migraciones 0000–0004 generadas con drizzle-kit (versionadas)
 services/
-  photoFiles.ts          Copiar y borrar fotos en documents/photos
-  cloudPhotos.ts         Subir, sincronizar, borrar y listar en Supabase (única capa con Supabase)
+  photoFiles.ts          Copiar, borrar y descargar fotos en documents/photos
+  cloudPhotos.ts         Feed paginado, URL firmadas y Realtime de Supabase
+  sync.ts                Ciclo bajar → descargar → subir, regla de conflicto pura (S9)
 lib/
   supabase.ts            Cliente de Supabase + auto-refresh con AppState
+  queryClient.ts         QueryClient + onlineManager (expo-network) + focusManager + persistencia (S9)
   secureStorage.ts       Adaptador de SecureStore por partes de 1000 caracteres
   exif.ts                Lectura de coordenadas EXIF iOS/Android (reto opcional)
 supabase/
   schema.sql             Tabla, políticas RLS, Realtime y bucket (Semana 8)
+  semana9.sql            server_updated_at + trigger, deleted_at e índices (Semana 9)
 types/
   geo.ts                 PermissionState, Coords, PhotoSource
 ```
+
+## Semana 9 — TanStack Query y sincronización offline-first
+
+GeoCam ya no tiene botón de "subir": **SQLite es la fuente de verdad** y la app se sincroniza sola con Supabase. TanStack Query **no sincroniza bases de datos**: ejecuta, reintenta y dispara el ciclo. El diseño (qué se sube, qué se baja y quién gana) está en [`services/sync.ts`](./services/sync.ts).
+
+### Las cinco decisiones del diseño
+
+1. **Fuente de verdad: SQLite.** La app siempre lee y escribe en local, con o sin red. La UI nunca espera a la nube.
+2. **Identidad compartida: `clientId`.** UUID creado en el teléfono. El `id` autoincremental solo vale dentro de un dispositivo.
+3. **Marca de pendiente:** `syncedAt` vacío o anterior a `updatedAt` (también para las marcas de borrado).
+4. **Cursor de bajada:** `lastPulledAt:<userId>` en la tabla local `sync_meta`, comparado con `server_updated_at`.
+5. **Conflictos: gana el último cambio.** Queda la versión con `updated_at` más reciente: `remoteWins()` es una función pura.
+
+### Ciclo de sincronización
+
+```mermaid
+flowchart TD
+    A[Disparo: abrir app / iniciar sesión / volver la red / primer plano / cambio local] --> B{¿Hay red?}
+    B -- No --> P[La consulta 'sync' queda en pausa<br/>onlineManager la reanuda al reconectar]
+    B -- Sí --> C[1. BAJAR<br/>filas con server_updated_at > cursor]
+    C --> D{¿Existe en local?}
+    D -- No --> E[Insertar ya sincronizada, uri vacía]
+    D -- Sí --> F{remoteWins?}
+    F -- Sí, borrada --> G[Eliminar fila y archivo local]
+    F -- Sí --> H[applyRemote: nota, favorita, updatedAt]
+    F -- No --> I[No tocar: push la subirá]
+    E & G & H & I --> J[Avanzar cursor fila por fila]
+    J --> K[2. DESCARGAR imágenes faltantes<br/>URL firmada → documents/photos]
+    K --> L[3. SUBIR pendientes, una por una]
+    L --> M{¿Marca de borrado?}
+    M -- Sí --> N[upsert con deleted_at → borrar archivo del bucket → borrar fila local]
+    M -- No --> O[subir archivo si falta → upsert por client_id → markSynced con la versión subida]
+    N & O --> Q[Guardar resultado en sync_meta]
+```
+
+**Se baja antes de subir** porque, si se subiera primero, un cambio local viejo podría pisar un cambio remoto más nuevo antes de compararlos.
+
+### Dos relojes en la tabla remota
+
+| Columna | Quién la escribe | Para qué sirve |
+|---|---|---|
+| `updated_at` | El teléfono, con la hora en que el usuario editó | Decidir quién gana un conflicto |
+| `server_updated_at` | PostgreSQL, con un trigger | Cursor de bajada: "dame lo que llegó al servidor después de X" |
+
+Una foto editada sin conexión el lunes y subida el miércoles tiene `updated_at` del lunes. Si el cursor usara esa columna, un teléfono que sincronizó el martes **nunca la bajaría**.
+
+### La regla de conflicto con un ejemplo
+
+Los teléfonos A y B tienen la foto `3f2a…` sincronizada con la nota "Parque". Los dos entran en modo avión.
+
+1. **10:00** — A cambia la nota a "Parque Simón Bolívar". En A: `updatedAt = 10:00`.
+2. **10:01** — B cambia la nota a "Atardecer". En B: `updatedAt = 10:01`.
+3. A se reconecta primero. Baja (no hay nada nuevo) y sube su versión: la nube queda con `updated_at = 10:00`.
+4. B se reconecta. **Baja primero:** la versión remota (10:00) no es más nueva que la suya (10:01), así que `remoteWins` es falso y no toca nada. Después **sube**: la nube queda con "Atardecer" y `updated_at = 10:01`.
+5. A sincroniza otra vez (al volver a primer plano). Baja la fila de B: 10:01 > 10:00, así que `remoteWins` es verdadero y aplica "Atardecer".
+
+**Resultado:** los dos teléfonos quedan con la nota de B, el último cambio. La edición de A se pierde. Es aceptable para notas personales; no lo sería para un saldo bancario. Además depende de que la hora de los teléfonos sea razonable.
+
+### Por qué es seguro reintentar (idempotencia)
+
+- El archivo siempre va a la misma ruta `<userId>/<clientId>.jpg`, con `upsert: true`.
+- La fila se sube con `upsert(..., { onConflict: 'client_id' })`: crea o actualiza, nunca duplica.
+- `markSynced` guarda `syncedAt = updatedAt` **de la versión subida**, no "ahora". Si el usuario edita durante la subida, la foto sigue pendiente.
+- `syncAll` reutiliza el ciclo en curso: si llegan dos disparos a la vez, se hace uno solo.
+
+### Taller en clase (T1–T7)
+
+| Tarea | Dónde |
+|---|---|
+| T1. Backend: `server_updated_at` + trigger + índice | [`supabase/semana9.sql`](./supabase/semana9.sql). La política de `update` ya existía desde la Semana 8 ("actualizar las mías"). |
+| T2. TanStack Query + `onlineManager` (expo-network) + `focusManager` | [`lib/queryClient.ts`](./lib/queryClient.ts), proveedor en [`app/_layout.tsx`](./app/_layout.tsx) |
+| T3. `sync_meta` + `pendingQuery`, `listPending`, `findByClientId`, `insertFromRemote`, `applyRemote`, `markSynced` | Migración `drizzle/0004_semana9_sync.sql`, [`db/repositories/photos.ts`](./db/repositories/photos.ts), [`db/repositories/syncMeta.ts`](./db/repositories/syncMeta.ts) |
+| T4. `pull(userId)` con cursor y "gana el último cambio" | [`services/sync.ts`](./services/sync.ts) |
+| T5. `push(userId)`: archivo si falta + upsert por `client_id` + `markSynced` | [`services/sync.ts`](./services/sync.ts) |
+| T6. `useSync` con `useQuery`, `requestSync()` tras cada cambio, indicador | [`hooks/useSync.ts`](./hooks/useSync.ts), [`components/SyncBadge.tsx`](./components/SyncBadge.tsx) |
+| T7. Pruebas sin conexión, dos teléfonos y conflicto | Matriz de pruebas (abajo), escenarios 1, 2 y 3 |
+
+Se conserva lo de la Semana 8: login, `Stack.Protected`, `ownerId` por usuario (C5: `insertFromRemote` guarda el dueño y `listPending` filtra por él), subida sin duplicados ni archivos huérfanos (C2) y la pestaña Nube.
+
+### Trabajo para la casa (C1–C7)
+
+- **C1. Borrados sincronizados.** Borrar una foto es marcarla: se ponen `deletedAt` y `updatedAt` con la hora actual, y la UI la oculta. Funciona sin conexión. `push` sube la marca (`deleted_at`) y, ya sincronizada, borra el archivo del bucket y la fila y el archivo locales. Los demás teléfonos aplican la marca al bajar. Si una edición local es posterior a un borrado remoto, gana la edición y la foto se vuelve a subir con su archivo.
+- **C2. Feed de la nube.** La pestaña Nube usa `useInfiniteQuery`, con paginación por cursor (`taken_at < último`), infinite scroll, búsqueda en vivo por nota (400 ms de espera) y los cuatro estados de UI: carga, error con reintento, vacío y sin conexión. Realtime solo invalida la caché.
+- **C3. Caché que sobrevive al cierre.** `PersistQueryClientProvider` guarda la caché en el `kv-store` de `expo-sqlite`. Solo se persisten las consultas `['cloud', userId, …]`; la sincronización nunca. Al cerrar sesión se limpia la caché.
+- **C4. Pantalla de estado.** [`app/sincronizacion.tsx`](./app/sincronizacion.tsx) muestra las pendientes, la fecha de la última sincronización, cuántas subieron, bajaron, se descargaron y fallaron, el último error y "Sincronizar ahora". Se abre al tocar el indicador.
+- **C5. Errores por foto.** Cada foto se sube en su propio `try/catch`: si una falla, las demás continúan y ella queda pendiente para el siguiente ciclo. Lo mismo pasa con las descargas: una foto bajada sin imagen queda con `uri` vacía (se ve ⬇️) y se reintenta en cada ciclo sin romper la sincronización.
+- **C6. Matriz de pruebas** (abajo).
+- **C7. Documentación:** esta sección, el GIF y [`AI-LOG.md`](./AI-LOG.md).
+
+### C6 — Matriz de pruebas
+
+> Probado en: _iPhone ___ (Expo Go SDK 57)_ y _segundo teléfono ___, con la misma cuenta. Fecha: ___
+
+| # | Escenario | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 1 | Foto tomada sin conexión; luego se reconecta | Se sube sola; pendientes vuelve a 0 | _por completar_ |
+| 2 | Foto creada en el teléfono A | Aparece en B con imagen y ubicación | _por completar_ |
+| 3 | Nota editada en A y después en B, ambos sin conexión | En los dos queda la nota de B | _por completar_ |
+| 4 | Foto borrada en A | Desaparece en B y del bucket | _por completar_ |
+| 5 | Foto editada en A y borrada después en B, ambos sin conexión | Queda borrada en los dos (el borrado es el último cambio) | _por completar_ |
+| 6 | Se corta la red a mitad de una sincronización de 5 fotos | Al reconectar termina sin duplicar filas ni archivos | _por completar_ |
+| 7 | Se cierra la app con fotos pendientes y se abre con red | Se sincroniza al abrir | _por completar_ |
+
+### Capturas
+
+| | |
+|---|---|
+| GIF de la prueba sin conexión | ![s9-demo](docs/s9-demo.gif) |
+| Indicador con pendientes en modo avión | ![](docs/s9-pendientes.png) |
+| Indicador "Al día" tras reconectar | ![](docs/s9-al-dia.png) |
+| Foto de A vista en B (lista y mapa) | ![](docs/s9-dos-telefonos.png) |
+| Conflicto resuelto (nota de B en A) | ![](docs/s9-conflicto.png) |
+| Borrado propagado a B | ![](docs/s9-borrado.png) |
+| Pantalla de sincronización (C4) | ![](docs/s9-estado.png) |
+| Pestaña Nube: feed y búsqueda (C2) | ![](docs/s9-nube.png) |
+| Pestaña Nube sin conexión con caché (C3) | ![](docs/s9-nube-offline.png) |
+| Tabla `photos` con `deleted_at` y `server_updated_at` | ![](docs/s9-tabla.png) |
+
+### Preguntas para sustentar
+
+1. **¿Por qué se baja antes de subir?** Para comparar antes de escribir: si se subiera primero, una versión local vieja pisaría en la nube una versión más nueva de otro teléfono.
+2. **¿Para qué dos fechas?** `updated_at` (teléfono) decide conflictos; `server_updated_at` (servidor) es el cursor. Con una sola, un cambio hecho sin conexión y subido tarde quedaría "antes" del cursor de otros teléfonos y nunca se bajaría.
+3. **¿Qué es idempotente?** Que repetir la subida da el mismo resultado: `upsert` por `client_id` y ruta fija del archivo. Por eso TanStack Query puede reintentar sin duplicar.
+4. **¿Por qué no un DELETE directo?** Porque una fila borrada no deja rastro: los demás teléfonos nunca se enteran. La marca `deleted_at` sí llega con el cursor.
+5. **¿Qué hace TanStack Query y qué es diseño propio?** TanStack Query decide **cuándo** ejecutar (al montar, al reconectar, al volver al primer plano, al invalidar), pausa sin red y reintenta. Qué se sube, qué se baja, el orden y quién gana es diseño propio en `services/sync.ts`.
+
+### Limitaciones
+
+- Los **álbumes no se sincronizan**: son locales a cada teléfono. Una foto bajada llega sin álbum.
+- "Gana el último cambio" depende de que la hora de los teléfonos sea razonable.
+- `pull` trae páginas de 200 filas hasta terminar. Una fila que falle al aplicarse detiene la bajada en ese punto y el siguiente ciclo continúa desde ahí.
+- La caché persistida de la Nube guarda URL firmadas de 1 hora: sin conexión se ve la lista, pero las imágenes solo aparecen si iOS las tiene en caché. Las fotos propias siempre se ven sin conexión en Fotos y Mapa, porque están en `documents/photos`.
 
 ## Semana 8 — Respaldo en la nube con Supabase
 

@@ -1,8 +1,11 @@
 // app/(tabs)/_layout.tsx
 import { Tabs } from 'expo-router/js-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { useSync } from '@/hooks/useSync';
 
 export default function TabsLayout() {
+  // Semana 9: mientras haya sesión, la sincronización automática queda activa en todas las pestañas
+  useSync();
   return (
     <Tabs
       screenOptions={{

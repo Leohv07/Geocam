@@ -37,6 +37,14 @@ export const photos = sqliteTable('photos', {
   syncedAt: integer('synced_at', { mode: 'timestamp_ms' }),
   // Semana 8 (C5): id del usuario de Supabase dueño de la foto en este teléfono
   ownerId: text('owner_id'),
+  // Semana 9 (C1): borrado lógico. Una foto borrada se marca, se sincroniza y solo después se elimina.
+  deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
+});
+
+// Semana 9 (T3): pares clave-valor de la sincronización (cursor de bajada, último resultado)
+export const syncMeta = sqliteTable('sync_meta', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
 });
 
 export type Album = typeof albums.$inferSelect;

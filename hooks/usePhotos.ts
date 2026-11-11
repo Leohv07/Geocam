@@ -2,8 +2,8 @@
 import { useCallback } from 'react';
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { photosRepo } from '@/db/repositories/photos';
-import { deletePhotoFile, persistPhoto } from '@/services/photoFiles';
-import { deleteRemotePhoto } from '@/services/cloudPhotos';
+import { persistPhoto } from '@/services/photoFiles';
+import { requestSync } from '@/hooks/useSync';
 import { useUserId } from '@/hooks/useUserId';
 import type { Coords, PhotoSource } from '@/types/geo';
 
@@ -33,36 +33,25 @@ export function usePhotos() {
         longitude: coords?.longitude ?? null,
         accuracy: coords?.accuracy ?? null,
       });
+      requestSync(); // Semana 9: la foto nueva queda pendiente y se pide subirla
     },
     [userId]
   );
 
   /**
-   * Semana 8 (C3): si la foto está en la nube, primero se borra allá.
-   * Si eso falla (sin conexión), se lanza el error y NO se borra nada local.
+   * Semana 9 (C1): borrar es marcar. Funciona sin conexión: la marca se sube en la próxima
+   * sincronización y recién entonces se borran el archivo del bucket y el local.
    */
   const removePhoto = useCallback(async (id: number) => {
-    const photo = await photosRepo.findById(id);
-    if (!photo) return;
-    await deleteRemotePhoto(photo);
-    await photosRepo.remove(id);
-    deletePhotoFile(photo.uri);
+    await photosRepo.markDeleted(id);
+    requestSync();
   }, []);
 
-  /** Borra todas las fotos del usuario. Las que no se pudieron borrar de la nube se conservan. */
-  const clearAll = useCallback(async (): Promise<number> => {
+  /** Marca como borradas todas las fotos del usuario. */
+  const clearAll = useCallback(async () => {
     const all = await photosRepo.listAll(userId);
-    let kept = 0;
-    for (const photo of all) {
-      try {
-        await deleteRemotePhoto(photo);
-        await photosRepo.remove(photo.id);
-        deletePhotoFile(photo.uri);
-      } catch {
-        kept++;
-      }
-    }
-    return kept;
+    for (const photo of all) await photosRepo.markDeleted(photo.id);
+    requestSync();
   }, [userId]);
 
   return { photos, photosWithLocation, error, addPhoto, removePhoto, clearAll };

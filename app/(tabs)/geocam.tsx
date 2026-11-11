@@ -32,13 +32,8 @@ export default function GeoCamScreen() {
       {
         text: 'Borrar',
         style: 'destructive',
-        // Semana 8 (C3): también se borran de la nube; las que no se puedan borrar allá se conservan
-        onPress: async () => {
-          const kept = await clearAll();
-          if (kept > 0) {
-            Alert.alert('Sin conexión', `${kept} foto(s) sincronizada(s) no se pudieron borrar de la nube y se conservaron.`);
-          }
-        },
+        // Semana 9 (C1): se marcan como borradas; la nube y los demás teléfonos se enteran al sincronizar
+        onPress: () => void clearAll(),
       },
     ]);
   }, [photos.length, clearAll]);
