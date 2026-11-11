@@ -15,32 +15,33 @@ export default function TabsLayout() {
         tabBarStyle: { backgroundColor: '#0a0a0a', borderTopColor: '#262626' },
       }}
     >
+      {/* SDK 58: el color del ícono llega como ColorValue; Ionicons lo pide como texto */}
       <Tabs.Screen
         name="geocam"
         options={{
           title: 'GeoCam',
-          tabBarIcon: ({ color, size }) => <Ionicons name="camera" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Ionicons name="camera" color={color as string} size={size} />,
         }}
       />
       <Tabs.Screen
         name="fotos"
         options={{
           title: 'Fotos',
-          tabBarIcon: ({ color, size }) => <Ionicons name="images" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Ionicons name="images" color={color as string} size={size} />,
         }}
       />
       <Tabs.Screen
         name="nube"
         options={{
           title: 'Nube',
-          tabBarIcon: ({ color, size }) => <Ionicons name="cloud" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Ionicons name="cloud" color={color as string} size={size} />,
         }}
       />
       <Tabs.Screen
         name="mapa"
         options={{
           title: 'Mapa',
-          tabBarIcon: ({ color, size }) => <Ionicons name="map" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Ionicons name="map" color={color as string} size={size} />,
         }}
       />
     </Tabs>

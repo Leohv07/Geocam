@@ -86,7 +86,8 @@ export default function NubeScreen() {
           onEndReached={() => {
             if (feed.hasNextPage && !feed.isFetchingNextPage) void feed.fetchNextPage();
           }}
-          ListFooterComponent={feed.isFetchingNextPage ? <ActivityIndicator className="m-4" color="#34d399" /> : null}
+          // SDK 58: ListFooterComponent ya no acepta null, se usa undefined
+          ListFooterComponent={feed.isFetchingNextPage ? <ActivityIndicator className="m-4" color="#34d399" /> : undefined}
           renderItem={({ item }) => (
             <View className="flex-1 overflow-hidden rounded-2xl bg-neutral-900">
               {item.url ? (
