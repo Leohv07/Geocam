@@ -17,8 +17,8 @@ Cámara que etiqueta cada foto con coordenadas GPS, las muestra en un mapa y rea
 
 | Tecnología | Versión |
 |---|---|
-| Expo SDK | 57 |
-| React Native | 0.86 (New Architecture) |
+| Expo SDK | 58 (actualizado desde 57 en la Semana 9, ver AI-LOG) |
+| React Native | 0.88 (New Architecture), React 19.3 |
 | Expo Router | `app/(tabs)` con 4 pestañas + `foto/[id]` + `login` |
 | NativeWind | v4 (Tailwind 3) |
 | Módulos nativos | `expo-camera`, `expo-location`, `expo-image-picker`, `expo-sensors`, `react-native-maps` |
@@ -186,36 +186,34 @@ Se conserva lo de la Semana 8: login, `Stack.Protected`, `ownerId` por usuario (
 - **C4. Pantalla de estado.** [`app/sincronizacion.tsx`](./app/sincronizacion.tsx) muestra las pendientes, la fecha de la última sincronización, cuántas subieron, bajaron, se descargaron y fallaron, el último error y "Sincronizar ahora". Se abre al tocar el indicador.
 - **C5. Errores por foto.** Cada foto se sube en su propio `try/catch`: si una falla, las demás continúan y ella queda pendiente para el siguiente ciclo. Lo mismo pasa con las descargas: una foto bajada sin imagen queda con `uri` vacía (se ve ⬇️) y se reintenta en cada ciclo sin romper la sincronización.
 - **C6. Matriz de pruebas** (abajo).
-- **C7. Documentación:** esta sección, el GIF y [`AI-LOG.md`](./AI-LOG.md).
+- **C7. Documentación:** esta sección, las capturas y [`AI-LOG.md`](./AI-LOG.md).
 
 ### C6 — Matriz de pruebas
 
-> Probado en: _iPhone ___ (Expo Go SDK 57)_ y _segundo teléfono ___, con la misma cuenta. Fecha: ___
+> Probado en: **un solo iPhone con Expo Go SDK 58**, cuenta `leohv980@gmail.com`. Fecha: 10/11/2026. Los escenarios que necesitan un segundo teléfono no se alcanzaron a ejecutar y se dejan marcados como pendientes.
 
 | # | Escenario | Resultado esperado | Resultado obtenido |
 |---|---|---|---|
-| 1 | Foto tomada sin conexión; luego se reconecta | Se sube sola; pendientes vuelve a 0 | _por completar_ |
-| 2 | Foto creada en el teléfono A | Aparece en B con imagen y ubicación | _por completar_ |
-| 3 | Nota editada en A y después en B, ambos sin conexión | En los dos queda la nota de B | _por completar_ |
-| 4 | Foto borrada en A | Desaparece en B y del bucket | _por completar_ |
-| 5 | Foto editada en A y borrada después en B, ambos sin conexión | Queda borrada en los dos (el borrado es el último cambio) | _por completar_ |
-| 6 | Se corta la red a mitad de una sincronización de 5 fotos | Al reconectar termina sin duplicar filas ni archivos | _por completar_ |
-| 7 | Se cierra la app con fotos pendientes y se abre con red | Se sincroniza al abrir | _por completar_ |
+| 1 | Foto tomada sin conexión; luego se reconecta | Se sube sola; pendientes vuelve a 0 | ✅ En modo avión: "Sin conexión · 2 pendientes" (⏳). Al quitar el modo avión, sin tocar nada, pasó a "✅ Al día". Pantalla de estado: 2 subidas, 0 fallidas |
+| 2 | Foto creada en el teléfono A | Aparece en B con imagen y ubicación | ⏳ No probado: requiere un segundo teléfono |
+| 3 | Nota editada en A y después en B, ambos sin conexión | En los dos queda la nota de B | ⏳ No probado: requiere un segundo teléfono |
+| 4 | Foto borrada en A | Desaparece en B y del bucket | ⏳ No probado en esta entrega |
+| 5 | Foto editada en A y borrada después en B, ambos sin conexión | Queda borrada en los dos (el borrado es el último cambio) | ⏳ No probado: requiere un segundo teléfono |
+| 6 | Se corta la red a mitad de una sincronización de 5 fotos | Al reconectar termina sin duplicar filas ni archivos | ⏳ No probado en esta entrega |
+| 7 | Se cierra la app con fotos pendientes y se abre con red | Se sincroniza al abrir | ⏳ No probado en esta entrega |
+| 8 | Pestaña Nube sin conexión (C3) | Aviso "Sin conexión" y la lista guardada | ✅ "Sin conexión. Se muestran los datos guardados." con las fotos en caché |
+| 9 | Pantalla de sincronización (C4) | Pendientes, última sincronización, error y botón | ✅ En línea, 0 pendientes, 2 subidas, 0 bajadas, 0 fallidas, "Sin errores en el último ciclo" |
+| 10 | Migración 0004 sobre los datos de la Semana 8 | No se pierde ninguna foto | ✅ Las 6 fotos y la nota "Prueba C2" siguieron en el teléfono |
 
 ### Capturas
 
 | | |
 |---|---|
-| GIF de la prueba sin conexión | ![s9-demo](docs/s9-demo.gif) |
 | Indicador con pendientes en modo avión | ![](docs/s9-pendientes.png) |
 | Indicador "Al día" tras reconectar | ![](docs/s9-al-dia.png) |
-| Foto de A vista en B (lista y mapa) | ![](docs/s9-dos-telefonos.png) |
-| Conflicto resuelto (nota de B en A) | ![](docs/s9-conflicto.png) |
-| Borrado propagado a B | ![](docs/s9-borrado.png) |
 | Pantalla de sincronización (C4) | ![](docs/s9-estado.png) |
 | Pestaña Nube: feed y búsqueda (C2) | ![](docs/s9-nube.png) |
 | Pestaña Nube sin conexión con caché (C3) | ![](docs/s9-nube-offline.png) |
-| Tabla `photos` con `deleted_at` y `server_updated_at` | ![](docs/s9-tabla.png) |
 
 ### Preguntas para sustentar
 
@@ -227,6 +225,7 @@ Se conserva lo de la Semana 8: login, `Stack.Protected`, `ownerId` por usuario (
 
 ### Limitaciones
 
+- **Miniaturas de fotos anteriores a SDK 58:** al actualizarse Expo Go a SDK 58, iOS cambió la carpeta interna de la app. SQLite guarda la ruta completa de cada foto, así que las fotos tomadas antes de la actualización salen con la miniatura vacía en Fotos y en el detalle (siguen bien en la pestaña Nube, que usa URL firmadas). Las fotos nuevas se ven bien. Arreglo pendiente: guardar solo el nombre del archivo y, si no existe, volver a descargarlo con `remotePath`.
 - Los **álbumes no se sincronizan**: son locales a cada teléfono. Una foto bajada llega sin álbum.
 - "Gana el último cambio" depende de que la hora de los teléfonos sea razonable.
 - `pull` trae páginas de 200 filas hasta terminar. Una fila que falle al aplicarse detiene la bajada en ese punto y el siguiente ciclo continúa desde ahí.

@@ -4,7 +4,7 @@
 **Semana:** 9
 **Proyecto:** GeoCam sincronizada — TanStack Query y sincronización offline-first (taller en clase T1–T7 + trabajo para la casa C1–C7)
 **Herramienta:** Claude Code (Claude Opus 5.5)
-**Versiones verificadas en `package.json` / `node_modules`:** Expo SDK 57, `@tanstack/react-query` 5.107.1, `@tanstack/react-query-persist-client` 5.107.1, `@tanstack/query-async-storage-persister` 5.107.1, `expo-network` 57.0.3, `drizzle-orm` 0.45, `drizzle-kit` 0.31
+**Versiones verificadas en `package.json` / `node_modules`:** Expo SDK 58 (actualizado desde 57, ver Corrección 8), React Native 0.88.1, `@tanstack/react-query` 5.107.1, `@tanstack/react-query-persist-client` 5.107.1, `@tanstack/query-async-storage-persister` 5.107.1, `expo-network` 58.0.4, `drizzle-orm` 0.45, `drizzle-kit` 0.31
 
 > Los AI-LOG anteriores están en [`docs/AI-LOG-semana6.md`](./docs/AI-LOG-semana6.md), [`docs/AI-LOG-semana7.md`](./docs/AI-LOG-semana7.md) y [`docs/AI-LOG-semana8.md`](./docs/AI-LOG-semana8.md).
 
@@ -47,6 +47,14 @@
 ### Adaptación 7 — Persistir solo la Nube (C3)
 - **Qué hicimos:** `shouldDehydrateQuery` guarda solo las consultas `['cloud', ...]`. La de sincronización nunca se persiste: si se guardara, al abrir la app se mostraría un resultado viejo. La llave incluye el `userId` y `signOut()` llama a `queryClient.clear()`, para que otra cuenta en el mismo teléfono no vea la caché anterior. Para no agregar un módulo nativo nuevo usamos `expo-sqlite/kv-store`, que tiene la API de AsyncStorage.
 
+### Corrección 8 — Expo Go se actualizó a SDK 58 en el iPhone
+- **Problema:** al probar, el iPhone mostró "Project is incompatible with this version of Expo Go": Expo Go quedó en SDK 58 y el proyecto estaba en SDK 57. En iOS no se puede instalar una versión anterior de Expo Go.
+- **Qué hicimos:** commit de seguridad (`dfe1fd0`), luego `npx expo install expo@^58.0.0` y `npx expo install --fix` (actualizó `@types/react` y `babel-preset-expo`). Se mantuvo el `.npmrc` con `legacy-peer-deps=true`.
+- **Errores de tipos con SDK 58** (`npx tsc --noEmit`, 5 errores en 2 archivos):
+  - `app/(tabs)/_layout.tsx`: el `color` de `tabBarIcon` ahora es `ColorValue` y `Ionicons` lo pide como texto → `color={color as string}` en los 4 íconos.
+  - `app/(tabs)/nube.tsx`: `ListFooterComponent` ya no acepta `null` → se usa `undefined`.
+- **Efecto secundario detectado en el iPhone:** las fotos tomadas antes de la actualización salen con la miniatura vacía. iOS cambió la carpeta interna de Expo Go y SQLite guardaba la ruta completa del archivo. Las fotos nuevas y la pestaña Nube se ven bien. Quedó documentado como limitación en el README.
+
 ## 3. Alucinaciones o Errores Detectados
 
 - **Firma de TanStack Query v3/v4:** revisamos que todo use la forma de objeto de la v5 (`useQuery({ queryKey, queryFn })`, `gcTime` y no `cacheTime`, `status === 'pending'` y no `'loading'`, `initialPageParam` declarado en `useInfiniteQuery`, sin `onSuccess` dentro de `useQuery`). `npx tsc --noEmit` pasa sin errores.
@@ -57,4 +65,10 @@
 
 - `npx tsc --noEmit`: sin errores.
 - Migración `drizzle/0004_semana9_sync.sql` generada con `npm run db:generate -- --name semana9_sync` (sin editar a mano): `CREATE TABLE sync_meta` + `ALTER TABLE photos ADD deleted_at`.
-- Las pruebas en el iPhone y en el segundo teléfono están en la matriz C6 del README. **Los resultados se anotan después de ejecutarlas.**
+- `npx tsc --noEmit` con SDK 58: sin errores después de la Corrección 8.
+- Pruebas en un iPhone con Expo Go SDK 58 (10/11/2026), detalladas en la matriz C6 del README:
+  - ✅ Sin conexión: "Sin conexión · 2 pendientes" → al reconectar, "✅ Al día" sin tocar nada (`docs/s9-pendientes.png`, `docs/s9-al-dia.png`).
+  - ✅ Pantalla de sincronización: 2 subidas, 0 fallidas, sin errores (`docs/s9-estado.png`).
+  - ✅ Nube sin conexión: aviso y lista guardada (`docs/s9-nube-offline.png`); Nube con las fotos nuevas (`docs/s9-nube.png`).
+  - ✅ La migración 0004 no borró ninguna foto de la Semana 8.
+  - ⏳ No se ejecutaron los escenarios con un segundo teléfono (bajada, conflicto y borrado remoto), ni el corte de red a mitad de la subida.
